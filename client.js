@@ -115,18 +115,32 @@ window.__ModuleLoader__.load({
       '.dsc-toast-close{flex:none;padding:0;font:inherit;font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0}',
       '.dsc-toast-close:hover{color:var(--dsw-alias-label-primary)}',
 
-      // Geometry is copied from the shipped browser the same way its colours
-      // are. `.bhn1Oq_root` insets itself by `--dsh-sidebar-inline-padding`,
-      // which `regionArea` has already handed back to the sidebar's own gutter;
-      // and `.bhn1Oq_root:not(.bhn1Oq_rail) .bhn1Oq_sectionHeader` pulls the
-      // header back out by 4px. Net: the header's right edge sits 8px inside the
-      // region, which is where the shipped add button lands. Without both the
-      // add control would float 18px further right than in 工作.
-      '.dsc-region{display:flex;flex-direction:column;min-height:0;height:100%;padding:2px var(--dsh-sidebar-inline-padding,12px) 0 0}',
+      // The region and its section header mirror the shipped browser's own
+      // geometry, declaration for declaration. `.bhn1Oq_root` insets itself by
+      // `--dsh-sidebar-inline-padding`, which `regionArea` has already handed
+      // back to the sidebar's own gutter; `.bhn1Oq_sectionHeader` is a 36px row
+      // with `margin-bottom:4px` and `padding-left:4px`; and its label carries no
+      // type of its own — it inherits the sidebar's 14px and the header's
+      // tertiary ink, with `max-width:45%` so it can never crowd the controls.
+      //
+      // One rule in that stylesheet is NOT mirrored, because it does not land:
+      // `.bhn1Oq_root:not(.bhn1Oq_rail) .bhn1Oq_sectionHeader` also declares
+      // `margin-right:-4px`, yet measuring a 工作 capture puts the shipped add
+      // button's right edge flush with the sidebar's content box (18.5px inside
+      // the sidebar's outer edge), not 4px past it. Copying the declaration
+      // instead of the measurement left 「日常聊天」's own control 4px tighter
+      // than 工作's, which is exactly what this row's right margin must not be.
+      // The three numbers the shipped browser publishes on its own root and the
+      // list spends. Declared here for the same reason: our list has to reserve
+      // exactly the same room for its scrollbar.
+      '.dsc-region{--dsh-session-list-edge-inset:var(--dsh-sidebar-inline-padding,12px);--dsh-session-list-scrollbar-width:8px;--dsh-session-list-scrollbar-offset:2px;display:flex;flex-direction:column;min-height:0;height:100%;padding:0 var(--dsh-sidebar-inline-padding,12px) 0 0}',
       '.dsc-region.dsc-rail{padding-right:0}',
-      '.dsc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-right:-4px;padding:0 0 8px 4px}',
-      '.dsc-rail .dsc-head{margin-right:0;padding-left:0}',
-      '.dsc-title{font-size:11px;line-height:16px;letter-spacing:.04em;color:var(--dsw-alias-label-secondary)}',
+      // One deliberate difference from the shipped rail header: that one drops
+      // its actions entirely, while this header always has the add control to
+      // place, so the horizontal distribution stays space-between in both states.
+      '.dsc-head{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:4px;height:36px;margin-top:2px;margin-bottom:4px;padding-left:4px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;overflow:hidden}',
+      '.dsc-rail .dsc-head{gap:0;margin-top:0;margin-bottom:12px;padding-left:0}',
+      '.dsc-title{white-space:nowrap;min-width:0;max-width:45%;flex:none;line-height:20px;overflow:hidden}',
       // The section header's add control is the shipped workspace browser's icon
       // button, declaration for declaration (`.bhn1Oq_iconButton` in
       // @deepseek-ai/dsh-client-ui-workspace): a bare 28px round button that
@@ -134,7 +148,23 @@ window.__ModuleLoader__.load({
       // own header has to carry the same affordance in the same clothes.
       '.dsc-new{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0;border-radius:50%;corner-shape:round}',
       '.dsc-new:hover{background:var(--dsw-alias-interactive-bg-hover)}',
-      '.dsc-list{display:flex;flex-direction:column;gap:1px;flex:1;min-height:0;overflow-y:auto;padding-bottom:6px}',
+      // The list sits in a wrapper that mirrors `.bhn1Oq_listArea`, and that
+      // wrapper is what decides where the scrollbar ends up: it pulls back out
+      // by the same inset the root added, so the list's box reaches the sidebar's
+      // outer edge and the list's own 2px offset then lands the gutter 2px inside
+      // it. Leave the wrapper out and the scrollbar — and every row's right edge
+      // — sits a whole inset too far in; that is exactly the miss this plugin
+      // made twice before a side-by-side capture settled it (工作: thumb ends 2px
+      // inside the sidebar edge; 日常 had 14px).
+      '.dsc-listArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:visible}',
+      '.dsc-rail .dsc-listArea{margin-left:0;margin-right:0;padding-left:0}',
+      // ...and the scroll container is the list inside it, mirroring
+      // `.bhn1Oq_list`: a 2px offset margin, a gutter reserved even when nothing
+      // overflows (`scrollbar-gutter:stable`, so the rows never jump when the
+      // list starts or stops scrolling), and a right padding of edge-inset minus
+      // scrollbar minus offset — 2px — which puts the rows' right edge where
+      // 工作's rows put theirs.
+      '.dsc-list{display:flex;flex-direction:column;gap:1px;flex:1;min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));padding-bottom:16px;scrollbar-gutter:stable;overflow-y:auto}',
       '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
       '.dsc-row:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
@@ -732,24 +762,27 @@ window.__ModuleLoader__.load({
                 },
               }, AddGlyph === null ? '＋' : h(AddGlyph, { size: wide ? 16 : 18 })),
             ]),
-            h('div', { className: 'dsc-list', key: 'list' }, rows.length === 0
-              ? h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'))
-              : rows.map((row) => h('button', {
-                key: row.id,
-                type: 'button',
-                className: 'dsc-row',
-                title: row.displayTitle,
-                onClick: () => openDaily(row.id),
-              }, [
-                h('span', {
-                  key: 'dot',
-                  className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
-                }),
-                h('span', { key: 'text', className: 'dsc-rowtext' }, [
-                  h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
-                  h('span', { key: 'time', className: 'dsc-rowtime' }, timeLabel(row.updatedAt, now, t)),
-                ]),
-              ]))),
+            // The wrapper the shipped browser wraps its own list in; see the
+            // `.dsc-listArea` rule for why the scrollbar needs it.
+            h('div', { className: 'dsc-listArea', key: 'listArea' },
+              h('div', { className: 'dsc-list', key: 'list' }, rows.length === 0
+                ? h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'))
+                : rows.map((row) => h('button', {
+                  key: row.id,
+                  type: 'button',
+                  className: 'dsc-row',
+                  title: row.displayTitle,
+                  onClick: () => openDaily(row.id),
+                }, [
+                  h('span', {
+                    key: 'dot',
+                    className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
+                  }),
+                  h('span', { key: 'text', className: 'dsc-rowtext' }, [
+                    h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
+                    h('span', { key: 'time', className: 'dsc-rowtime' }, timeLabel(row.updatedAt, now, t)),
+                  ]),
+                ])))),
           ]);
         }
 
