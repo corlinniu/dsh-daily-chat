@@ -4,7 +4,7 @@
 >
 > 日常模式跑一个只有对话能力的轻量 agent —— 有人格、能联网检索、能向你提问、能压缩上下文，但没有文件读写、没有 Shell、没有计划模式、没有子代理；工作模式完全沿用 DSH 原有行为，一行都不改。
 
-一个纯客户端 DSH 插件：不 fork DSH 本体，只往它公开的 4 个槽位注册 7 条内容、外加一个服务补丁，DSH 升级后不会把插件带坏。
+一个纯客户端 DSH 插件：不 fork DSH 本体，只往它公开的 4 个槽位注册 7 条内容、再加三个方法补丁（客户端两个导航方法、Host 一个预设选择），DSH 升级后不会把插件带坏。
 
 <div align="center">
   <img alt="侧边栏顶部多出「日常聊天」与「开始工作」两行入口" src="./assets/sidebar-modes.png" width="760" />
@@ -38,6 +38,7 @@ DSH 原本只有一个「新会话」，而它一定是完整的编码 Agent：�
 | 跑的是哪个 agent | `daily` 预设 | profile 默认预设（默认 `standard`） |
 | 模型手里的工具 | 对话人格、网页检索/抓取、提问、上下文压缩 | 全部 |
 | 侧边栏那一片 | 换成日常会话列表 | 原生工作区浏览器 |
+| 上下文 | 锁死：改不了项目，也换不了 Agent 模式 | 随便改 |
 | 会话落在哪 | 专属工作区（标题「日常聊天」） | 原有工作区 |
 | 记忆 / 图片识别 / 模型路由 | 照常可用 | 照常可用 |
 
@@ -45,10 +46,12 @@ DSH 原本只有一个「新会话」，而它一定是完整的编码 Agent：�
 
 ## 两种模式
 
-| | 日常聊天 | 开始工作 |
+| | 日常 | 工作 |
 |---|---|---|
 | 侧边栏入口 | 「日常聊天」整行，`order: -20` | 「开始工作」整行，`order: -10` |
 | 预设 | `daily` | profile 默认（本机为 `standard`） |
+| 开场那一行 | 「项目」与「Agent 模式」两个 chip 都不出现 | 两个都在 |
+| 能不能改上下文 | 不能：会话钉在「日常聊天」工作区上，预设钉在 `daily` 上 | 随便：项目、预设、计划模式、子代理 |
 | 核心循环 | 用户消息 → 模型 → 工具调用（检索 / 提问）→ 回复 | 用户消息 → 模型 → 工具调用（读文件 / 改文件 / 跑命令 / 计划 / 子代理）→ 回复 |
 | 会话列表 | 日常会话，按更新时间倒序，运行中带绿点 | 原生分组列表 |
 
@@ -59,7 +62,7 @@ DSH 原本只有一个「新会话」，而它一定是完整的编码 Agent：�
 ### 0. 前置条件
 
 - 一个可运行的 DSH web profile。本版本在 DSH `0.1.6-alpha.2`、macOS 上验证过；依赖的槽位契约是 `sidebar.panellist` / `sidebar.workspaces` / `shell.overlay` / `main`。
-- 插件只贡献客户端（`dsh.client.platform: web`），没有构建步骤。
+- 插件分两半：Host 半（[index.js](./index.js)）装预设、建工作区、锁日常会话的预设；客户端半（[client.js](./client.js)，`dsh.client.platform: web`）贡献全部界面。没有构建步骤。
 
 ### 1. `daily` agent 预设：插件自己装
 
@@ -108,6 +111,7 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 
 - **点「日常聊天」** —— 解析（必要时创建）日常工作区 → 打开一个空白会话 → 把它的预设切成 `daily` → 把中间栏交还会话。中间只会闪一帧占位文字，不会停在中间页。
 - **点「开始工作」** —— 记下工作模式，走 DSH 原生的 `startSession`。
+- **日常里改不了上下文** —— 日常聊天只有「日常聊天 / `daily`」这一种上下文，所以开场那行的「项目」和「Agent 模式」两个 chip 直接不出现；从别处发起的工作区切换（空会话里那个「选工作区」提示、目录选择器）会被服务层拒绝并弹一张提示卡，从设置页把某个预设「设为默认」也改不动日常会话的预设，只会看到 DSH 原生的「无法切换到…」。想换项目或换能力，先点「开始工作」。
 - **模式会记住** —— 存在 localStorage 的 `dsh.daily-chat.mode`，读写失败时一律按 `work` 处理，不改变原有习惯。
 - **日常列表** —— 日常模式下，侧边栏工作区区域被替换成日常会话列表：点一行打开该会话并确保仍处于日常模式；标题栏右侧的「＋ 日常聊天」等同于点「日常聊天」。
 - **点击串台保护** —— 一次日常会话还没打开时又点了「开始工作」，以最后一次为准（内部用递增 ticket 作废过期的启动）。
@@ -117,32 +121,38 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 
 ### Host 半 —— [index.js](./index.js)
 
-做两件浏览器做不可靠的事：
+做三件浏览器做不可靠的事：
 
 1. **装 `daily` 预设。** 把包内 [preset/daily/](./preset/daily) 复制到 `<harness home>/.agent-presets/daily/`。DSH 的预设名单只合并「随 harness 发布的 + 部署配置的根 + 用户根」，插件无法声明自己带一个预设，所以只能落到用户根。已经存在就不动（你的改动优先），半成品则补齐。
 2. **建并注册日常工作区。** 在 `<DSH_HOME>/daily-chat`（默认 `~/.dsh/daily-chat`）建目录，注册成标题为「日常聊天」的工作区；注册是幂等的，已注册的路径不动。
+3. **把日常会话钉在 `daily` 预设上。** 在 `agentPresets.select` 的原型上补一层：会话的 `cwd` 是日常目录、而目标预设不是 `daily` 时直接拒绝，客户端会把它显示成 DSH 原生的「无法切换到「标准模式」：…」。这条只能落在 Host：客户端那半能藏掉 chip，但预设还有别的入口 —— 设置页的「设为默认」会顺手写进当前空白会话 —— 而预设决定模型手里到底有哪些工具。
 
-两件都是尽力而为：失败只打一条 warn，客户端会各自兜底（预设退回部署默认值，工作区退回目录选择框）。客户端那半用目录 basename `daily-chat` 认领工作区、按 id `daily` 选预设，所以浏览器永远不用猜路径、也不会一开始就弹框问人；`DSH_HOME` 的读法与部署其它部分一致，未设置时用 `~/.dsh`。
+三条都是尽力而为：前两条失败只打一条 warn，客户端会各自兜底（预设退回部署默认值，工作区退回目录选择框）；第三条在拿不到 `agentPresets` 时什么都不做，只是不锁。客户端那半用目录 basename `daily-chat` 认领工作区、按 id `daily` 选预设，所以浏览器永远不用猜路径、也不会一开始就弹框问人；`DSH_HOME` 的读法与部署其它部分一致，未设置时用 `~/.dsh`。
 
 ### Client 半 —— [client.js](./client.js)
 
-四个贡献加一个补丁：
+四个贡献、两个原型补丁，外加一个模式属性（Host 那半还有第三个补丁，见上）：
 
 | 席位 | 配置 | 作用 |
 |---|---|---|
 | `sidebar.panellist` ×2 | `order: -20` / `-10` | 两行带图标 + 文字的入口，排在「插件」之上。行长得像「插件」，点击权归侧边栏，只能 `selectPanel(id)` |
 | `main` ×2 | `key: daily-chat` / `daily-chat-work` | 每行配一个面板：面板执行一次动作后立刻把中间栏交还会话 —— 这就是两行都直接落进输入框、没有中间页的原因 |
 | `sidebar.workspaces` | `priority: -1`，仅日常模式注册 | 单值槽位只有「活着的、优先级最低的」那一条会渲染，所以 `-1` 接管工作区区域，注销即让原生浏览器回来 |
-| `shell.overlay` ×2 | 全局 | 隐藏原生「新会话」按钮的 CSS；失败提示卡 |
+| `shell.overlay` ×2 | 全局 | 隐藏原生「新会话」按钮的 CSS，以及日常模式下隐藏开场那行的模式规则；失败提示卡 |
 | `uiWorkspace.startSession` 原型补丁 | — | 所有「新会话」入口都汇聚到这一个方法。日常模式下它改道去开日常会话；另外它也是「开始工作」要调回的原方法 |
+| `uiWorkspace.openWorkspace` 原型补丁 | — | 所有「切项目」都汇聚到这一个方法：开场那行的「项目」chip、空会话里的工作区提示、目录选择器。日常模式下目标不是日常工作区就拒绝（reject + 提示卡），reject 还顺带把选择器乐观显示的那个名字收回去 |
+| `<html data-dsc-mode>` | 仅日常模式写着 | 模式相关的 CSS 靠它生效；插件卸载时移除 |
 
-补丁打在服务**原型**上而不是实例上：Cordis 发给每个使用方的都是同一个实例的独立 traceable 代理，而侧边栏早在插件加载之前就抓住了自己那份代理。
+补丁打在服务**原型**上而不是实例上：Cordis 发给每个使用方的都是同一个实例的独立 traceable 代理，而侧边栏早在插件加载之前就抓住了自己那份代理，Host 的 API 网关也是每次调用才从原型上取方法。
+
+「不出现 + 拦得住」是两层：开场那行是 CSS 按 `<html data-dsc-mode="daily">` 藏掉的（看不到就点不到），服务层那两个补丁负责挡住绕过 UI 的路（空会话里的工作区提示、设置页改默认预设、以后新加的入口）。
 
 其它值得知道的点：
 
 - 时间分桶优先用 `@deepseek-ai/dsh-client-ui-primitives` 的 `relativeTime`，取不到就用本地 fallback。
 - 宿主服务/标准 props 缺失时全部退化成空快照（`EMPTY_WORKSPACES` / `EMPTY_SESSIONS`），不会因为某个来源没装而崩。
 - 中英文案都写在 [client.js](./client.js) 顶部，注册在 locale 命名空间 `dailyChat`。
+- 日常工作区还没解析出来时，`staysDaily` 会放行而不是拦死 —— 宁可少锁一次，也不让导航在启动那一瞬间卡住。
 
 ## 配置项
 
@@ -150,8 +160,9 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 |---|---|---|
 | localStorage key | `dsh.daily-chat.mode` | 当前模式，`daily` / `work` |
 | 日常 agent preset id | `daily` | 想换成自己的预设，改 [client.js](./client.js) 里的 `DAILY_PRESET` 与 [index.js](./index.js) 里的 `DAILY_PRESET` |
+| 模式属性 | `data-dsc-mode="daily"`，挂在 `<html>` 上 | 只在日常模式存在；模式相关的 CSS 全部挂在它下面，插件卸载即移除。见 [client.js](./client.js) 的 `MODE_ATTRIBUTE` |
 | 预设安装位置 | `<dshHome>/.agent-presets/daily/`，默认 `~/.dsh/.agent-presets/daily/` | Host 半从包内 `preset/daily/` 复制；已存在则不覆盖 |
-| 日常工作区目录 | `<dshHome>/daily-chat`，默认 `~/.dsh/daily-chat` | Host 建目录；客户端按 basename `daily-chat` 认领 |
+| 日常工作区目录 | `<dshHome>/daily-chat`，默认 `~/.dsh/daily-chat` | Host 建目录；客户端按 basename `daily-chat` 认领；Host 侧也按这个目录判断「这是不是日常会话」 |
 | Host 目录常量 | `daily-chat` | 见 [index.js](./index.js) 的 `DAILY_DIRECTORY`，与客户端常量需一致 |
 | locale 命名空间 | `dailyChat` | — |
 
@@ -161,8 +172,8 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 |---|---|
 | [package.json](./package.json) | 包名、`exports`、`dsh.bundle.patch`、`dsh.client`（`platform: web`、`immediately`、`inject`、`external`） |
 | [cordis.patch.yml](./cordis.patch.yml) | 一行 `insert`，把这个包挂进 profile |
-| [index.js](./index.js) | Host 半：装 `daily` 预设 + 建目录并注册工作区 |
-| [client.js](./client.js) | Client 半：全部 UI、状态与「新会话」路由 |
+| [index.js](./index.js) | Host 半：装 `daily` 预设 + 建目录并注册工作区 + 锁住日常会话的预设 |
+| [client.js](./client.js) | Client 半：全部 UI、状态、「新会话」路由与项目锁定 |
 | [preset/daily/](./preset/daily) | `daily` 预设本体：`preset.yml`（展示元数据）+ `agent.cordis.yml`（组装） |
 | [assets/sidebar-modes.png](./assets/sidebar-modes.png) | README 用截图：侧边栏顶部的两行模式入口 |
 
@@ -171,11 +182,14 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 - **没有构建步骤。** [client.js](./client.js) 是手写的 ESM 工厂（`window.__ModuleLoader__.load`），由客户端模块加载器直接读取；改完刷新页面即可，没生效就重启 `dsh web`。
 - **改名要改三处。** 包名同时出现在 [package.json](./package.json)、[cordis.patch.yml](./cordis.patch.yml) 的 `name`、以及 [client.js](./client.js) 里 `load({ id })` 的 `id`；profile 的 `bundles` 里也是这个名字。
 - **调预设的两条路。** 改仓库里的 [preset/daily/agent.cordis.yml](./preset/daily/agent.cordis.yml)（可用的行、提示词段落）或 [preset/daily/preset.yml](./preset/daily/preset.yml)（显示名与描述）**只影响此后新装的环境** —— 已安装的那份不会被覆盖；要立刻生效就直接改 `~/.dsh/.agent-presets/daily/` 下的文件，新会话即生效。
-- **手动验证清单：** ① 侧边栏两行在「插件」之上；② 点「日常聊天」直达输入框且工具列表里没有 bash/文件类；③ 日常模式下列表只显示日常会话；④ 切「开始工作」后列表还原成原生工作区浏览器；⑤ 关掉插件后原生「新会话」按钮回来；⑥ 在一个干净的 `DSH_HOME` 下启动一次，`<DSH_HOME>/.agent-presets/daily/` 与 `<DSH_HOME>/daily-chat/` 自动出现，再启动一次不改动已有内容。
+- **手动验证清单：** ① 侧边栏两行在「插件」之上；② 点「日常聊天」直达输入框且工具列表里没有 bash/文件类；③ 日常模式下列表只显示日常会话；④ 切「开始工作」后列表还原成原生工作区浏览器；⑤ 关掉插件后原生「新会话」按钮回来；⑥ 在一个干净的 `DSH_HOME` 下启动一次，`<DSH_HOME>/.agent-presets/daily/` 与 `<DSH_HOME>/daily-chat/` 自动出现，再启动一次不改动已有内容；⑦ 日常模式下开场那行整个不出现（项目与 Agent 模式两个 chip 都没有），`<html>` 上能看到 `data-dsc-mode="daily"`；⑧ 在设置页把标准模式「设为默认」，日常会话的预设不动、只看到 DSH 原生的拒绝提示；⑨ 点「开始工作」照旧出得来，出来后项目 chip 与 Agent 模式 chip 都回来了。
 
 ## 已知限制
 
 - **原生「新会话」按钮只能靠 CSS 隐藏。** 它是侧边栏里的手写 JSX，外面没有槽位能替换它，唯一的杠杆是 `button[class*="newSession"]{display:none}`。DSH 若改掉这个 CSS-module 类名，规则失配、按钮重新出现 —— 失败方向是「多一个按钮」，不会误伤别的东西。macOS 窗口控件用的是另一个模块的另一个类名，不受影响。
+- **开场那行的隐藏也是 CSS，同样怕改名。** 规则是 `html[data-dsc-mode="daily"] [class*="heroWorkspaceRow"]`，命中 `@deepseek-ai/dsh-client-ui-conversation` 里那个行容器。DSH 改名后 chip 会重新出现，但服务层那两个补丁还在拦，所以失败方向是「看得见、点了被拒」，不是「又能切了」。
+- **两条锁定靠的是三个方法名。** 客户端补 `uiWorkspace.startSession` / `uiWorkspace.openWorkspace`，Host 补 `agentPresets.select`。任何一个被改名或改签名，对应的那条锁静默失效（补丁取不到原方法就不装），不会连带报错。Host 那条按会话 `cwd` 是否等于 `<harness home>/daily-chat` 判断，所以把日常会话手工挪出那个目录之后就不再受锁 —— 那时候它本来也不再是日常会话了。
+- **日常会话转正仍然要手工搬内容。** 锁的是上下文，不是内容：想让一次日常对话变成工作任务，还是得把内容复制到工作会话里，或者干脆破例 —— 先「开始工作」，再把对话内容贴过去。
 - **Windows 上要留意。** 标题栏轨道布局会收起侧边栏面板列表，那个被隐藏的按钮原本是剩余入口；当前只在 macOS 验证过。
 - **两个模式的会话互相看不见。** 它们分属两个工作区，想让一次日常对话「转正」成工作任务，得自己把内容搬过去。
 - **只服务 web profile。** headless / tui / sdk 等 profile 没有这些槽位，装了也没有界面。

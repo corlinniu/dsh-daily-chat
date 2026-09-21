@@ -52,6 +52,8 @@ window.__ModuleLoader__.load({
     const LOCALE_NS = 'dailyChat';
     /** The single localStorage key holding the active mode. */
     const MODE_KEY = 'dsh.daily-chat.mode';
+    /** The `<html>` attribute the mode-scoped chrome rules hang off. */
+    const MODE_ATTRIBUTE = 'data-dsc-mode';
     /** The agent preset a daily chat runs on. */
     const DAILY_PRESET = 'daily';
     /** The workspace directory basename that identifies the daily workspace. */
@@ -66,6 +68,7 @@ window.__ModuleLoader__.load({
       dailyChats: '日常聊天',
       startWork: '开始工作',
       newChat: '＋ 日常聊天',
+      lockedProject: '日常聊天固定在自己的工作区，不能切换项目。要开始工作，请点侧边栏的「开始工作」。',
       starting: '正在打开日常聊天…',
       startingWork: '正在切换到工作模式…',
       empty: '还没有日常聊天，点上面开始第一句。',
@@ -84,6 +87,7 @@ window.__ModuleLoader__.load({
       dailyChats: 'Chats',
       startWork: 'Start working',
       newChat: '+ Chat',
+      lockedProject: 'A chat stays in its own workspace — use “Start working” in the sidebar to open a project.',
       starting: 'Opening chat…',
       startingWork: 'Switching to work…',
       empty: 'No chats yet. Start one above.',
@@ -150,9 +154,21 @@ window.__ModuleLoader__.load({
      * (The one place this over-hides is a Windows titlebar rail, where the shell
      * hides the panel list and this button would be the remaining affordance.
      * This profile runs macOS.)
+     *
+     * The second rule is mode-scoped: it hangs off an attribute this plugin puts
+     * on `<html>` while 日常 is the active mode, and the attribute goes away with
+     * the mode, so the rule only exists for a daily chat. It hides the new-chat
+     * row the conversation renders above the composer — 「项目」 and 「Agent 模式」,
+     * the two choices a daily chat does not get to make, because its workspace
+     * and its preset are what make it a daily chat. Typing into either is refused
+     * on the service side as well (the `openWorkspace` patch below, and the
+     * Host's preset lock), so this rule is what the operator sees rather than
+     * the only thing standing in the way. As with the button rule, a renamed
+     * class means the row simply comes back.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
+      `html[${MODE_ATTRIBUTE}="daily"] [class*="heroWorkspaceRow"]{display:none !important}`,
     ].join('');
 
     /* ── relative time ────────────────────────────────────────────────────── */
@@ -215,6 +231,24 @@ window.__ModuleLoader__.load({
     let state = { mode: readMode(), busy: false, error: null };
     const listeners = new Set();
 
+    /**
+     * Reflect the active mode onto the document, which is what the mode-scoped
+     * chrome rules key off. The CSS this plugin injects is static, so the mode
+     * has to be readable from the DOM rather than from React state; anything
+     * other than `daily` means the attribute is absent and every rule that
+     * depends on it is inert.
+     * @param mode - the mode to publish.
+     */
+    function syncModeAttribute(mode) {
+      try {
+        if (typeof document === 'undefined') return;
+        if (mode === 'daily') document.documentElement.setAttribute(MODE_ATTRIBUTE, 'daily');
+        else document.documentElement.removeAttribute(MODE_ATTRIBUTE);
+      } catch (reason) {
+        console.warn('[daily-chat] publishing the active mode to the document failed:', reason);
+      }
+    }
+
     /** Merge one state patch, persist the mode, and notify every reader. */
     function setState(patch) {
       state = Object.assign({}, state, patch);
@@ -224,6 +258,7 @@ window.__ModuleLoader__.load({
         } catch (reason) {
           console.warn('[daily-chat] saving the mode failed:', reason);
         }
+        syncModeAttribute(patch.mode);
       }
       for (const listener of [...listeners]) listener();
     }
@@ -320,6 +355,14 @@ window.__ModuleLoader__.load({
         );
         const t = ctx.locale.bind(LOCALE_NS);
 
+        // Publish the mode the page loaded with, and take the mark away when
+        // this plugin unloads: the chrome rules it drives belong to the plugin,
+        // so nothing of them may outlive it.
+        ctx.effect(() => {
+          syncModeAttribute(state.mode);
+          return () => syncModeAttribute('work');
+        }, 'daily-chat: mode-scoped chrome');
+
         /** The shipped `startSession`, restored on unload. */
         let originalStartSession = undefined;
         /** Re-entrancy guard: starting a chat must not re-enter through the patch. */
@@ -354,6 +397,24 @@ window.__ModuleLoader__.load({
             if (segments[segments.length - 1] === DAILY_DIRECTORY) return item;
           }
           return undefined;
+        }
+
+        /**
+         * Whether opening one workspace would stay inside the daily workspace.
+         *
+         * Project switching is the one navigation a daily chat does not get: its
+         * workspace is what makes it a daily chat, and every other workspace
+         * belongs to the work half of the product. The daily workspace is
+         * resolved on each call rather than remembered, so this holds on a page
+         * that is still waiting for the Host's first workspace baseline — an
+         * unresolved daily workspace lets the navigation through rather than
+         * breaking it outright.
+         * @param workspaceId - the workspace the navigation targets.
+         * @returns whether the target is the daily workspace.
+         */
+        function staysDaily(workspaceId) {
+          const daily = pickDailyWorkspace(ctx.workspaces.list.getSnapshot().items);
+          return daily !== undefined && workspaceId === daily.workspaceId;
         }
 
         /** Resolve once the Host's first workspace baseline lands, or on timeout. */
@@ -733,17 +794,23 @@ window.__ModuleLoader__.load({
           };
         });
 
-        // Every New Session entry point — the sidebar shell's own button
-        // included — lands on `uiWorkspace.startSession`, so that one method is
-        // where chat mode has to be honoured. The patch lives on the service
-        // PROTOTYPE: Cordis hands each consumer a fresh traceable proxy of one
-        // shared instance, and the sidebar captured its proxy long before this
-        // plugin loaded.
+        // Two shipped navigation methods carry chat mode's two refusals.
+        //
+        // `startSession` is where every New Session entry point lands — the
+        // sidebar shell's own button included — so that is where 日常 has to be
+        // honoured. `openWorkspace` is where every project switch lands: the
+        // new-chat row's 项目 chip, the empty composer's workspace prompt and
+        // the directory picker all funnel into it, and a daily chat may not
+        // leave its own workspace through any of them. Both patches live on the
+        // service PROTOTYPE: Cordis hands each consumer a fresh traceable proxy
+        // of one shared instance, and the sidebar captured its proxy long
+        // before this plugin loaded.
         ctx.inject(['uiWorkspace'], (workspaceCtx) => {
           workspaceCtx.effect(() => {
             const proto = Object.getPrototypeOf(workspaceCtx.uiWorkspace);
             const original = proto === null ? undefined : proto.startSession;
             if (typeof original !== 'function') return undefined;
+            const originalOpenWorkspace = proto.openWorkspace;
 
             originalStartSession = original;
             proto.startSession = function startSession(workspaceId) {
@@ -754,11 +821,31 @@ window.__ModuleLoader__.load({
               return original.call(this, workspaceId);
             };
 
+            // Refused rather than redirected: the caller asked for another
+            // project, and the honest answer is that a daily chat does not have
+            // one. The rejection is also what puts the pickers back in step —
+            // they clear the choice they optimistically showed on a rejection —
+            // and the toast is the only place the reason can be read, since the
+            // pickers swallow their own failure.
+            if (typeof originalOpenWorkspace === 'function') {
+              proto.openWorkspace = function openWorkspace(workspaceId, beforeOpen) {
+                if (state.mode === 'daily' && !staysDaily(workspaceId)) {
+                  const refusal = new Error(t('lockedProject'));
+                  setState({ error: refusal.message });
+                  return Promise.reject(refusal);
+                }
+                return originalOpenWorkspace.call(this, workspaceId, beforeOpen);
+              };
+            }
+
             return () => {
               proto.startSession = original;
+              if (typeof originalOpenWorkspace === 'function') {
+                proto.openWorkspace = originalOpenWorkspace;
+              }
               originalStartSession = undefined;
             };
-          }, 'daily-chat: New Session routing');
+          }, 'daily-chat: New Session routing and the project lock');
         });
       },
     };

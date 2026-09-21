@@ -1,7 +1,7 @@
 /**
  * Host half of the daily-chat plugin.
  *
- * Two jobs, both of which the browser cannot do reliably:
+ * Three jobs, all of which the browser cannot do reliably:
  *
  * 1. Make the `daily` agent preset real. A preset is a directory under the
  *    harness home's user preset root (`<dshHome>/.agent-presets/<id>/`), and
@@ -21,11 +21,21 @@
  *    registered, the browser never has to guess a path or ask the operator to
  *    pick one.
  *
+ * 3. Keep a daily chat on its own preset. A session that lives in the daily
+ *    workspace may not be recomposed on another preset, and only the Host can
+ *    promise that: the client half hides the new-chat row's 「Agent 模式」 chip
+ *    and the client-side navigation refusals cover the project chip, but a
+ *    preset switch is also reachable from surfaces this plugin does not own —
+ *    the settings section's "make default" writes the new default through to
+ *    the current blank session — and the preset decides which tools the model
+ *    holds at all.
+ *
  * The harness home is read from `DSH_HOME` with the same default the rest of the
- * deployment uses. Both jobs are best-effort: a failure costs a warning and
- * nothing else, because the client half already handles a missing preset (it
+ * deployment uses. The first two jobs are best-effort: a failure costs a warning
+ * and nothing else, because the client half already handles a missing preset (it
  * falls back to the deployment default) and a missing workspace (it falls back
- * to the directory picker).
+ * to the directory picker). The third job is silent when the services it needs
+ * are absent, and simply does not lock anything.
  */
 
 import { cpSync, existsSync, mkdirSync } from 'node:fs';
@@ -44,6 +54,14 @@ export const DAILY_PRESET = 'daily';
 
 /** The composition file that makes a preset directory a preset at all. */
 const PRESET_COMPOSITION = 'agent.cordis.yml';
+
+/**
+ * What a blocked preset switch says. The client half already reads this field
+ * class back out as the reason under DSH's own 「无法切换」 toast, so the wording
+ * is the operator-facing message, not a log line.
+ */
+const LOCKED_PRESET_REASON =
+  `日常聊天固定使用 ${DAILY_PRESET} 预设；要获得完整能力，请点侧边栏的「开始工作」。`;
 
 /**
  * The preset copy this package ships. Resolved relative to this module rather
@@ -107,11 +125,68 @@ async function registerDailyWorkspace(ctx, home) {
 }
 
 /**
+ * The project directory a session was created in, when the Host knows it.
+ * @param agent - the agent handle the gateway resolved for a preset switch.
+ * @returns the absolute `cwd`, or undefined for anything unexpected.
+ */
+function sessionDirectory(agent) {
+  try {
+    const cwd = agent?.session?.header?.cwd;
+    return typeof cwd === 'string' ? cwd : undefined;
+  } catch (reason) {
+    return undefined;
+  }
+}
+
+/**
+ * Refuse to move a daily session onto another agent preset.
+ *
+ * The patch sits on the service PROTOTYPE, where the shipped method is: the
+ * gateway resolves a fresh traceable proxy of the one `agentPresets` instance
+ * per invocation and reads the method off the prototype at call time, so one
+ * patch covers every caller — the new-chat chip, the settings section, and any
+ * surface added later. The disposer puts the original back when this row
+ * unloads.
+ *
+ * The rule is scoped to the daily workspace rather than to the preset id: the
+ * `daily` preset is a normal, pickable row in the roster, and an operator who
+ * deliberately runs a work session on it must still be able to switch back.
+ * A session the Daily half put in `<harness home>/daily-chat` has no such
+ * business.
+ *
+ * @param ctx - the Host context this row was mounted with.
+ * @param home - the harness home.
+ */
+function lockDailyPreset(ctx, home) {
+  const workspaceDirectory = join(home, DAILY_DIRECTORY);
+
+  ctx.inject(['agentPresets'], (presetCtx) => {
+    presetCtx.effect(() => {
+      const proto = Object.getPrototypeOf(presetCtx.agentPresets);
+      const original = proto === null ? undefined : proto.select;
+      if (typeof original !== 'function') return undefined;
+
+      proto.select = function select(agent, agentPreset) {
+        if (agentPreset !== DAILY_PRESET && sessionDirectory(agent) === workspaceDirectory) {
+          throw new Error(LOCKED_PRESET_REASON);
+        }
+        return original.call(this, agent, agentPreset);
+      };
+
+      return () => {
+        proto.select = original;
+      };
+    }, 'daily-chat: daily preset lock');
+  });
+}
+
+/**
  * Prepare everything a daily chat needs before the client half asks for it.
  * @param ctx - the Host context this row was mounted with.
  */
 export async function apply(ctx) {
   const home = harnessHome();
   installDailyPreset(ctx, home);
+  lockDailyPreset(ctx, home);
   await registerDailyWorkspace(ctx, home);
 }
