@@ -1,0 +1,82 @@
+# The `daily` agent preset: 日常聊天模式。
+#
+# This is an AGENT-PLANE composition, mounted once under a standing scope and
+# joined by every session that names it. Its point is a DIFFERENT core loop
+# from `standard`:
+#
+#   standard (工作)  用户消息 → 模型 → 工具调用 → (读文件 / 改文件 / 跑命令 / 计划 / 子代理) → 回复
+#   daily   (日常)  用户消息 → 模型 → 工具调用（检索 / 提问）→ 回复
+#
+# So every row that exists to act on a repository is deliberately absent:
+# no bash/pwsh, no fs or fs-search, no background jobs, no skills, no goals,
+# no plan mode, no todo ledger, no subagents, no workflows. What stays is what
+# a conversation needs — a persona, the web, the question tool, and compaction
+# so a long chat does not fall over on its own context.
+#
+# Memory, image reading and the model route are NOT here on purpose: those are
+# host/profile rows (the OpenViking bundle, the LLM route), so a daily session
+# keeps them without this file naming a single one.
+#
+# A service row in a preset MUST sit inside a group carrying an `isolate`
+# realm. `persona` only contributes a prompt section and publishes no service,
+# so it needs none; the compaction group needs one, for the reason the shipped
+# `standard` preset documents.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# Shadows the deployment persona for this agent only. `{{model}}` resolves
+# from the agent's own route; interpolation of `{{…}}` is strict, so only
+# registered variables appear here.
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: |-
+      你是「日常」——一个轻量、亲切的聊天伙伴，由 {{model}} 模型驱动。
+      这不是写代码的工作会话：没有文件、Shell 或仓库上下文，只有你和用户之间的对话。
+
+      说话方式：自然、直接、像一个靠谱的朋友。先想清楚用户真正在意的是什么，再回答。
+      能一句说清就别写三段；不要用标题和长清单堆砌，除非用户确实要一份清单。
+      需要事实、时间或外部信息时，用可用的工具去查，不要凭记忆编造。
+      用户找你商量事情时，给出你自己的判断和取舍，而不是把所有可能性罗列一遍。
+      只有在意图确实含糊、又无法从对话里推断时，才用 ask_user_question 问一个具体的问题。
+      用户提到以前聊过的事、或者让你记住什么，用记忆工具去查和记，不要假装记得。
+    suffix: |-
+      你处在「日常聊天」模式。侧边栏的「工作」按钮可以切换到完整的编码 Agent。
+
+# ── the two tools a conversation actually needs ─────────────────────────────
+
+# The `web` service and its search provider live in the host composition; only
+# the model-facing tool is per-session.
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+# ── context hygiene for long conversations ──────────────────────────────────
+
+# `compaction-basic` reads `toolResultPrune` through `ctx.get`, so the pruner
+# has to share this realm rather than sit outside it. `tokenMeter` stays on the
+# host plane, exactly as the shipped preset documents.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024

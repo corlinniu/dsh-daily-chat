@@ -1,0 +1,34 @@
+{
+  "name": "@local/dsh-daily-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Split New Session into 日常 (a lightweight chat agent) and 工作 (the shipped coding agent), with a daily-chat session list in the sidebar.",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-api-workspace-controller",
+        "@deepseek-ai/dsh-api-session-controller"
+      ],
+      "external": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  }
+}
