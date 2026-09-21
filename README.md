@@ -61,18 +61,20 @@ DSH 原本只有一个「新会话」，而它一定是完整的编码 Agent：�
 - 一个可运行的 DSH web profile。本版本在 DSH `0.1.6-alpha.2`、macOS 上验证过；依赖的槽位契约是 `sidebar.panellist` / `sidebar.workspaces` / `shell.overlay` / `main`。
 - 插件只贡献客户端（`dsh.client.platform: web`），没有构建步骤。
 
-### 1. 部署 `daily` agent 预设
+### 1. `daily` agent 预设：插件自己装
 
-DSH 的用户预设根固定是 `<dshHome>/.agent-presets/<presetId>/`（默认 `~/.dsh/.agent-presets/`），一个 preset 就是一个目录，目录名即 preset id。把仓库里的这份复制过去：
+日常模式跑的 `daily` 预设随仓库发布在 [preset/daily/](./preset/daily)：[preset.yml](./preset/daily/preset.yml) 是选择器里的显示名与描述，[agent.cordis.yml](./preset/daily/agent.cordis.yml) 决定这个预设装哪些行（人格、网页工具、提问工具、压缩组）。
 
-```bash
-mkdir -p ~/.dsh/.agent-presets
-cp -R preset/daily ~/.dsh/.agent-presets/daily
-```
+DSH 的用户预设根固定是 `<dshHome>/.agent-presets/<presetId>/`，而插件没有任何办法声明「我自带一个预设」，所以 **Host 半在加载时把包里这份复制到那里**，装完即用，不需要你手工操作。
 
-之后 `~/.dsh/.agent-presets/daily/` 下应该有 [preset.yml](./preset/daily/preset.yml)（选择器里的显示名与描述）和 [agent.cordis.yml](./preset/daily/agent.cordis.yml)（该 preset 装哪些插件：人格、网页工具、提问工具、压缩组）。
+规则是**装上、不覆盖**：
 
-> 没有这个 preset 也能跑起来：插件选预设失败时只打一条 warn 并回退到 profile 默认预设，代价是日常会话又变回完整编码 Agent —— 日常模式就失去意义了。预设文件改动后，新会话即生效，不需要重启。
+- 目标位置已经有 `agent.cordis.yml`（你已经有一份自己的 `daily`）→ 什么都不做，你的内容留着；
+- 只有目录、没有组装文件（半成品或坏预设）→ 补齐；
+- 想自定义 → 直接改 `<dshHome>/.agent-presets/daily/` 下的文件，或者先手工 `cp -R preset/daily ~/.dsh/.agent-presets/daily` 再改，插件都不会动它；
+- 复制失败只打一条 warn，其它功能照常。
+
+> 没有这个预设也能跑起来：插件选预设失败时只打一条 warn 并回退到 profile 默认预设，代价是日常会话又变回完整编码 Agent —— 日常模式就失去意义了。预设文件改动后，新会话即生效，不需要重启。
 
 ### 2. 把插件装进 profile
 
@@ -115,7 +117,12 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 
 ### Host 半 —— [index.js](./index.js)
 
-只做一件浏览器做不可靠的事：在 `<DSH_HOME>/daily-chat`（默认 `~/.dsh/daily-chat`）建目录，并把它注册成标题为「日常聊天」的工作区。注册是幂等的，已注册的路径不动；目录建不出来只打一条 warn，客户端会退回目录选择框。客户端那半用目录 basename `daily-chat` 认领它，所以浏览器永远不用猜路径、也不用一开始就弹框问人。
+做两件浏览器做不可靠的事：
+
+1. **装 `daily` 预设。** 把包内 [preset/daily/](./preset/daily) 复制到 `<harness home>/.agent-presets/daily/`。DSH 的预设名单只合并「随 harness 发布的 + 部署配置的根 + 用户根」，插件无法声明自己带一个预设，所以只能落到用户根。已经存在就不动（你的改动优先），半成品则补齐。
+2. **建并注册日常工作区。** 在 `<DSH_HOME>/daily-chat`（默认 `~/.dsh/daily-chat`）建目录，注册成标题为「日常聊天」的工作区；注册是幂等的，已注册的路径不动。
+
+两件都是尽力而为：失败只打一条 warn，客户端会各自兜底（预设退回部署默认值，工作区退回目录选择框）。客户端那半用目录 basename `daily-chat` 认领工作区、按 id `daily` 选预设，所以浏览器永远不用猜路径、也不会一开始就弹框问人；`DSH_HOME` 的读法与部署其它部分一致，未设置时用 `~/.dsh`。
 
 ### Client 半 —— [client.js](./client.js)
 
@@ -142,8 +149,9 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 | 名字 | 值 | 说明 |
 |---|---|---|
 | localStorage key | `dsh.daily-chat.mode` | 当前模式，`daily` / `work` |
+| 日常 agent preset id | `daily` | 想换成自己的预设，改 [client.js](./client.js) 里的 `DAILY_PRESET` 与 [index.js](./index.js) 里的 `DAILY_PRESET` |
+| 预设安装位置 | `<dshHome>/.agent-presets/daily/`，默认 `~/.dsh/.agent-presets/daily/` | Host 半从包内 `preset/daily/` 复制；已存在则不覆盖 |
 | 日常工作区目录 | `<dshHome>/daily-chat`，默认 `~/.dsh/daily-chat` | Host 建目录；客户端按 basename `daily-chat` 认领 |
-| 日常 agent preset id | `daily` | 想换成自己的预设，改 [client.js](./client.js) 里的 `DAILY_PRESET` |
 | Host 目录常量 | `daily-chat` | 见 [index.js](./index.js) 的 `DAILY_DIRECTORY`，与客户端常量需一致 |
 | locale 命名空间 | `dailyChat` | — |
 
@@ -153,7 +161,7 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 |---|---|
 | [package.json](./package.json) | 包名、`exports`、`dsh.bundle.patch`、`dsh.client`（`platform: web`、`immediately`、`inject`、`external`） |
 | [cordis.patch.yml](./cordis.patch.yml) | 一行 `insert`，把这个包挂进 profile |
-| [index.js](./index.js) | Host 半：建目录 + 注册工作区 |
+| [index.js](./index.js) | Host 半：装 `daily` 预设 + 建目录并注册工作区 |
 | [client.js](./client.js) | Client 半：全部 UI、状态与「新会话」路由 |
 | [preset/daily/](./preset/daily) | `daily` 预设本体：`preset.yml`（展示元数据）+ `agent.cordis.yml`（组装） |
 | [assets/sidebar-modes.png](./assets/sidebar-modes.png) | README 用截图：侧边栏顶部的两行模式入口 |
@@ -162,8 +170,8 @@ dsh plugin --profile web add link:/path/to/dsh-daily-chat
 
 - **没有构建步骤。** [client.js](./client.js) 是手写的 ESM 工厂（`window.__ModuleLoader__.load`），由客户端模块加载器直接读取；改完刷新页面即可，没生效就重启 `dsh web`。
 - **改名要改三处。** 包名同时出现在 [package.json](./package.json)、[cordis.patch.yml](./cordis.patch.yml) 的 `name`、以及 [client.js](./client.js) 里 `load({ id })` 的 `id`；profile 的 `bundles` 里也是这个名字。
-- **调预设不用碰插件。** 改 [preset/daily/agent.cordis.yml](./preset/daily/agent.cordis.yml)（可用的行、提示词段落）或 [preset/daily/preset.yml](./preset/daily/preset.yml)（显示名与描述），复制到 `~/.dsh/.agent-presets/daily/` 后建新会话即生效。
-- **手动验证清单：** ① 侧边栏两行在「插件」之上；② 点「日常聊天」直达输入框且工具列表里没有 bash/文件类；③ 日常模式下列表只显示日常会话；④ 切「开始工作」后列表还原成原生工作区浏览器；⑤ 关掉插件后原生「新会话」按钮回来。
+- **调预设的两条路。** 改仓库里的 [preset/daily/agent.cordis.yml](./preset/daily/agent.cordis.yml)（可用的行、提示词段落）或 [preset/daily/preset.yml](./preset/daily/preset.yml)（显示名与描述）**只影响此后新装的环境** —— 已安装的那份不会被覆盖；要立刻生效就直接改 `~/.dsh/.agent-presets/daily/` 下的文件，新会话即生效。
+- **手动验证清单：** ① 侧边栏两行在「插件」之上；② 点「日常聊天」直达输入框且工具列表里没有 bash/文件类；③ 日常模式下列表只显示日常会话；④ 切「开始工作」后列表还原成原生工作区浏览器；⑤ 关掉插件后原生「新会话」按钮回来；⑥ 在一个干净的 `DSH_HOME` 下启动一次，`<DSH_HOME>/.agent-presets/daily/` 与 `<DSH_HOME>/daily-chat/` 自动出现，再启动一次不改动已有内容。
 
 ## 已知限制
 
@@ -188,7 +196,7 @@ dsh plugin --profile web remove @local/dsh-daily-chat
 
 可选清理（不做也不影响使用）：
 
-- `~/.dsh/.agent-presets/daily/` —— 不再需要日常模式时删除；
+- `~/.dsh/.agent-presets/daily/` —— 插件装进去的预设**不会随卸载自动删除**（它可能已经被你改过），不再需要日常模式时自行删除；
 - `~/.dsh/daily-chat/` 与 `~/.dsh/storages/workspace.json` 里那条工作区记录 —— 想彻底抹掉日常会话历史；
 - 浏览器 localStorage 的 `dsh.daily-chat.mode`。
 
