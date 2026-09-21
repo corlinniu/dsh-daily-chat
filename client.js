@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
       dismiss: '知道了',
       dailyChats: '日常聊天',
       startWork: '开始工作',
-      newChat: '＋ 日常聊天',
+      newChat: '新建日常聊天',
       lockedProject: '日常聊天固定在自己的工作区，不能切换项目。要开始工作，请点侧边栏的「开始工作」。',
       starting: '正在打开日常聊天…',
       startingWork: '正在切换到工作模式…',
@@ -86,7 +86,7 @@ window.__ModuleLoader__.load({
       dismiss: 'Dismiss',
       dailyChats: 'Chats',
       startWork: 'Start working',
-      newChat: '+ Chat',
+      newChat: 'New chat',
       lockedProject: 'A chat stays in its own workspace — use “Start working” in the sidebar to open a project.',
       starting: 'Opening chat…',
       startingWork: 'Switching to work…',
@@ -115,11 +115,25 @@ window.__ModuleLoader__.load({
       '.dsc-toast-close{flex:none;padding:0;font:inherit;font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0}',
       '.dsc-toast-close:hover{color:var(--dsw-alias-label-primary)}',
 
-      '.dsc-region{display:flex;flex-direction:column;min-height:0;height:100%;padding:2px 0 0}',
-      '.dsc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 8px}',
+      // Geometry is copied from the shipped browser the same way its colours
+      // are. `.bhn1Oq_root` insets itself by `--dsh-sidebar-inline-padding`,
+      // which `regionArea` has already handed back to the sidebar's own gutter;
+      // and `.bhn1Oq_root:not(.bhn1Oq_rail) .bhn1Oq_sectionHeader` pulls the
+      // header back out by 4px. Net: the header's right edge sits 8px inside the
+      // region, which is where the shipped add button lands. Without both the
+      // add control would float 18px further right than in 工作.
+      '.dsc-region{display:flex;flex-direction:column;min-height:0;height:100%;padding:2px var(--dsh-sidebar-inline-padding,12px) 0 0}',
+      '.dsc-region.dsc-rail{padding-right:0}',
+      '.dsc-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-right:-4px;padding:0 0 8px 4px}',
+      '.dsc-rail .dsc-head{margin-right:0;padding-left:0}',
       '.dsc-title{font-size:11px;line-height:16px;letter-spacing:.04em;color:var(--dsw-alias-label-secondary)}',
-      '.dsc-new{height:26px;padding:0 9px;font:inherit;font-size:12.5px;color:var(--dsw-alias-label-primary);cursor:pointer;background:var(--dsw-alias-bg-layer-2);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;white-space:nowrap}',
-      '.dsc-new:hover{border-color:var(--dsw-alias-border-l2)}',
+      // The section header's add control is the shipped workspace browser's icon
+      // button, declaration for declaration (`.bhn1Oq_iconButton` in
+      // @deepseek-ai/dsh-client-ui-workspace): a bare 28px round button that
+      // only paints on hover. 日常 replaces that browser in the sidebar, so its
+      // own header has to carry the same affordance in the same clothes.
+      '.dsc-new{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0;border-radius:50%;corner-shape:round}',
+      '.dsc-new:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.dsc-list{display:flex;flex-direction:column;gap:1px;flex:1;min-height:0;overflow-y:auto;padding-bottom:6px}',
       '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
       '.dsc-row:hover{background:var(--dsw-alias-bg-layer-2)}',
@@ -165,10 +179,23 @@ window.__ModuleLoader__.load({
      * Host's preset lock), so this rule is what the operator sees rather than
      * the only thing standing in the way. As with the button rule, a renamed
      * class means the row simply comes back.
+     *
+     * The third rule drops the icon from the session header's Agent-preset chip
+     * while 日常 is active, leaving its text. The chip is the shipped
+     * `AgentPresetLabel` in `@deepseek-ai/dsh-client-ui-agent-preset`, and its
+     * icon says "this session runs a preset"; in 日常 the answer is always the
+     * same one, so the glyph is noise. It is anchored on the slot key — the same
+     * `conversation.session.header.actions` this deployment registers into, and
+     * the anchor DSH's own stylesheets use — rather than on the chip's hashed
+     * class, and then on the chip's SHAPE: a root `<span>` carrying the preset's
+     * description as its `title`, with the glyph as its own first child. The
+     * other occupants of that slot (jobs, schedule, terminal, cost meter) are
+     * buttons or `<div>`s, so the shape selects exactly one element.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
       `html[${MODE_ATTRIBUTE}="daily"] [class*="heroWorkspaceRow"]{display:none !important}`,
+      `html[${MODE_ATTRIBUTE}="daily"] [data-slot="conversation.session.header.actions"] > span[title] > svg{display:none !important}`,
     ].join('');
 
     /* ── relative time ────────────────────────────────────────────────────── */
@@ -307,6 +334,16 @@ window.__ModuleLoader__.load({
     }
 
     /* ── artwork ──────────────────────────────────────────────────────────── */
+
+    /**
+     * The 「add」 glyph the shipped workspace browser draws in its section
+     * header. Taken from the primitives module rather than hand-drawn, because
+     * the point of the control is that it looks like the one 日常 replaced; a
+     * deployment whose primitives predate it falls back to a bare plus.
+     */
+    const AddGlyph = typeof primitives.IconProjectAddOutline16 === 'function'
+      ? primitives.IconProjectAddOutline16
+      : null;
 
     /**
      * A chat bubble. The seat decides the size: the sidebar asks a
@@ -668,6 +705,7 @@ window.__ModuleLoader__.load({
         /** The session list that stands in for the workspace browser in chat mode. */
         function DailyRegion(props) {
           const t = props.t;
+          const wide = props.wide !== false;
           const now = Date.now();
           const workspaces = useWorkspacesOf(props);
           const sessions = useSessionsOf(props);
@@ -675,18 +713,24 @@ window.__ModuleLoader__.load({
 
           const rows = dailyRows(workspaces, sessions);
 
-          return h('div', { className: 'dsc-region' }, [
+          return h('div', { className: 'dsc-region' + (wide ? '' : ' dsc-rail') }, [
             h('style', { key: 'css' }, CSS),
             h('div', { className: 'dsc-head', key: 'head' }, [
               h('div', { className: 'dsc-title', key: 'title' }, t('dailyChats')),
+              // The shipped header's add control: same glyph, same two sizes
+              // (16 in the expanded sidebar, 18 in the collapsed rail), same
+              // hover-only paint — a text button here would be the one row of
+              // the sidebar that speaks a different language.
               h('button', {
                 key: 'new',
                 type: 'button',
                 className: 'dsc-new',
+                title: t('newChat'),
+                'aria-label': t('newChat'),
                 onClick: () => {
                   void startDailyChat();
                 },
-              }, t('newChat')),
+              }, AddGlyph === null ? '＋' : h(AddGlyph, { size: wide ? 16 : 18 })),
             ]),
             h('div', { className: 'dsc-list', key: 'list' }, rows.length === 0
               ? h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'))
