@@ -137,10 +137,18 @@ window.__ModuleLoader__.load({
       '.dsc-region.dsc-rail{padding-right:0}',
       // One deliberate difference from the shipped rail header: that one drops
       // its actions entirely, while this header always has the add control to
-      // place, so the horizontal distribution stays space-between in both states.
+      // place. With the label hidden in the rail the single remaining child sits
+      // at the start either way, so the distribution needs no rail override.
       '.dsc-head{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:4px;height:36px;margin-top:2px;margin-bottom:4px;padding-left:4px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;overflow:hidden}',
-      '.dsc-rail .dsc-head{gap:0;margin-top:0;margin-bottom:12px;padding-left:0}',
       '.dsc-title{white-space:nowrap;min-width:0;max-width:45%;flex:none;line-height:20px;overflow:hidden}',
+      // A rail is for picking a mode, not for browsing or for starting one. The
+      // shipped browser renders neither its label nor its list when collapsed;
+      // 日常's one remaining control in the section would be the add button, and
+      // measured against a rail capture it sat 4px left of the icon column the
+      // mode rows above it share — so the header goes with the list instead of
+      // leaving one misaligned glyph behind it.
+      '.dsc-rail .dsc-head{display:none}',
+      '.dsc-rail .dsc-listArea{display:none}',
       // The section header's add control is the shipped workspace browser's icon
       // button, declaration for declaration (`.bhn1Oq_iconButton` in
       // @deepseek-ai/dsh-client-ui-workspace): a bare 28px round button that
@@ -157,7 +165,6 @@ window.__ModuleLoader__.load({
       // made twice before a side-by-side capture settled it (工作: thumb ends 2px
       // inside the sidebar edge; 日常 had 14px).
       '.dsc-listArea{min-height:0;margin-left:-4px;margin-right:calc(-1 * var(--dsh-session-list-edge-inset));flex-direction:column;flex:1;padding-left:4px;display:flex;overflow:visible}',
-      '.dsc-rail .dsc-listArea{margin-left:0;margin-right:0;padding-left:0}',
       // ...and the scroll container is the list inside it, mirroring
       // `.bhn1Oq_list`: a 2px offset margin, a gutter reserved even when nothing
       // overflows (`scrollbar-gutter:stable`, so the rows never jump when the
