@@ -58,6 +58,8 @@ window.__ModuleLoader__.load({
     const DAILY_PRESET = 'daily';
     /** The workspace directory basename that identifies the daily workspace. */
     const DAILY_DIRECTORY = 'daily-chat';
+    /** The title the Host half registers the daily workspace with. */
+    const DAILY_TITLE = '日常聊天';
     /** The `main` panel the 「日常聊天」 sidebar row opens. */
     const DAILY_PANEL = 'daily-chat';
     /** The `main` panel the 「开始工作」 sidebar row transiently opens. */
@@ -473,6 +475,62 @@ window.__ModuleLoader__.load({
           return undefined;
         }
 
+        /* ── the work-mode view ───────────────────────────────────────────────── */
+
+        /**
+         * Whether one registered workspace is 日常聊天 itself rather than a
+         * project.
+         *
+         * Deliberately stricter than {@link pickDailyWorkspace}, which may fall
+         * back to the directory basename alone: a wrong "yes" here deletes a
+         * real project from the work-mode sidebar, while a wrong "no" only
+         * leaves the daily row in place. The basename fallback therefore also
+         * asks for the title the Host half registered the workspace with.
+         * @param item - one workspace record.
+         * @param expected - the path the Host half registers, when it is known.
+         * @returns whether work mode should keep this row out of the sidebar.
+         */
+        function isDailyWorkspace(item, expected) {
+          if (expected !== undefined && item.path === expected) return true;
+          const segments = item.path.split(/[\\/]/);
+          return segments[segments.length - 1] === DAILY_DIRECTORY && item.title === DAILY_TITLE;
+        }
+
+        // A Workspace registration carries no `hidden` flag, so work mode can
+        // only keep the daily row out of the sidebar by filtering the snapshot
+        // the sidebar renders from. The projection is cached per raw snapshot:
+        // the browser reads through `useWorkspaces`, whose selector hook
+        // compares snapshots by IDENTITY, and a fresh object on every call would
+        // re-render forever.
+        /** raw workspace snapshot → its work-mode projection. */
+        const workModeViews = new WeakMap();
+
+        /**
+         * The workspace snapshot the sidebar may see for the active mode.
+         *
+         * Chat mode sees everything — that is the mode the daily workspace
+         * belongs to, and resolving it reads this very snapshot. Work mode sees
+         * every OTHER workspace: 日常聊天 is not a project, and a project row
+         * that switches the whole product back into chat mode reads as one.
+         * @param snapshot - the model's own snapshot.
+         * @returns the snapshot to publish.
+         */
+        function visibleWorkspaces(snapshot) {
+          if (state.mode !== 'work') return snapshot;
+          const items = snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot.items;
+          if (!Array.isArray(items)) return snapshot;
+          const home = hostHome();
+          const expected = home === undefined ? undefined : home + '/.dsh/' + DAILY_DIRECTORY;
+          if (!items.some((item) => isDailyWorkspace(item, expected))) return snapshot;
+          const cached = workModeViews.get(snapshot);
+          if (cached !== undefined) return cached;
+          const filtered = Object.assign({}, snapshot, {
+            items: items.filter((item) => !isDailyWorkspace(item, expected)),
+          });
+          workModeViews.set(snapshot, filtered);
+          return filtered;
+        }
+
         /**
          * Whether opening one workspace would stay inside the daily workspace.
          *
@@ -570,19 +628,27 @@ window.__ModuleLoader__.load({
          * Resolving the workspace is asynchronous, and the two mode rows are one
          * click apart: without the ticket below, picking 「开始工作」 while a
          * daily start is still in flight would let that start land afterwards
-         * and drag the UI back into chat mode.
+         * and drag the UI back into chat mode. A start that loses the ticket
+         * also leaves the mode alone — the newer action already set it.
+         *
+         * Chat mode is published BEFORE the workspace is resolved, because work
+         * mode hides the daily workspace from the snapshot (see
+         * {@link visibleWorkspaces}) and both the resolution and the connect
+         * below read that snapshot. A start that fails puts the previous mode
+         * back, so a refusal leaves the sidebar exactly as it was.
          */
         async function startDailyChat() {
           if (starting) return;
           starting = true;
           const ticket = ++startTicket;
-          setState({ busy: true, error: null });
+          const previous = state.mode;
+          setState({ mode: 'daily', busy: true, error: null });
           try {
             const workspace = await resolveDailyWorkspace();
             if (ticket !== startTicket) return;
             const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
             if (ticket !== startTicket) return;
-            setState({ mode: 'daily', busy: false, error: null });
+            setState({ busy: false, error: null });
             ctx.layout.selectPanel(null);
             ctx.uiWorkspace.openSession(sessionId);
             try {
@@ -592,7 +658,8 @@ window.__ModuleLoader__.load({
             }
           } catch (reason) {
             console.warn('[daily-chat] starting a daily chat failed:', reason);
-            setState({ busy: false, error: `${t('failed')}：${describe(reason)}` });
+            if (ticket !== startTicket) return;
+            setState({ mode: previous, busy: false, error: `${t('failed')}：${describe(reason)}` });
           } finally {
             starting = false;
           }
@@ -930,6 +997,30 @@ window.__ModuleLoader__.load({
               originalStartSession = undefined;
             };
           }, 'daily-chat: New Session routing and the project lock');
+        });
+
+        // Work mode does not list the daily workspace.
+        //
+        // The filter sits on the model PROTOTYPE for the same reason the two
+        // navigation patches do: Cordis hands each consumer a fresh traceable
+        // proxy of one shared model, and the sidebar published its own proxy as
+        // the `workspaces` hook long before this plugin loaded. Only the shared
+        // prototype reaches it — and the hook calls `getSnapshot()` through that
+        // proxy on every read, so the projection needs no resubscription to take
+        // effect.
+        ctx.inject(['workspaces'], (workspaceCtx) => {
+          workspaceCtx.effect(() => {
+            const model = workspaceCtx.workspaces.list;
+            const proto = model === null || model === undefined ? null : Object.getPrototypeOf(model);
+            const original = proto === null ? undefined : proto.getSnapshot;
+            if (typeof original !== 'function') return undefined;
+            proto.getSnapshot = function getSnapshot() {
+              return visibleWorkspaces(original.call(this));
+            };
+            return () => {
+              proto.getSnapshot = original;
+            };
+          }, 'daily-chat: work mode hides the daily workspace');
         });
       },
     };
