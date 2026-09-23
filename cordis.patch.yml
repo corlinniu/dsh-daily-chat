@@ -4,6 +4,10 @@
 # directory exists and is registered; the Client half contributes the two-button
 # New Session control, the daily session list that replaces the sidebar browsing
 # region while 日常 is the active mode, and the New Session routing.
+#
+# The second patch layer this bundle ships, `preset/daily.patch.yml`, declares
+# the `daily` agent preset; both paths are listed in package.json's
+# `dsh.bundle.patch`.
 - insert:
     - id: daily-chat
       name: '@local/dsh-daily-chat'

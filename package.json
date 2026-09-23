@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-daily-chat",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "Split New Session into 日常 (a lightweight chat agent) and 工作 (the shipped coding agent), with a daily-chat session list in the sidebar.",
   "type": "module",
@@ -10,7 +10,10 @@
   },
   "dsh": {
     "bundle": {
-      "patch": "./cordis.patch.yml"
+      "patch": [
+        "./cordis.patch.yml",
+        "./preset/daily.patch.yml"
+      ]
     },
     "client": {
       "platform": "web",

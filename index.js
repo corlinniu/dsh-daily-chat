@@ -3,17 +3,18 @@
  *
  * Three jobs, all of which the browser cannot do reliably:
  *
- * 1. Make the `daily` agent preset real. A preset is a directory under the
- *    harness home's user preset root (`<dshHome>/.agent-presets/<id>/`), and
- *    nothing a plugin can declare contributes one — the roster merges only the
- *    presets shipped with the harness, the roots a deployment configured, and
- *    that user root. So this package carries its own copy under `preset/daily/`
- *    and installs it here, which is what makes a fresh install work without a
- *    manual copying step.
- *
- *    Installed, never enforced: a preset already sitting at the target path is
- *    left exactly as it is, so an operator who edited theirs keeps their edits
- *    and this row never fights them on the next reload.
+ * 1. Own the `daily` agent preset for an install that predates this bundle's
+ *    patch. The preset is DECLARED, not installed: this bundle ships
+ *    `preset/daily.patch.yml` as one of its patch layers (`dsh.bundle.patch` in
+ *    package.json), and that file carries the `@deepseek-ai/dsh-agent-preset`
+ *    declaration DSH 0.1.7 and later read presets from. Older versions took
+ *    them from a directory under the harness home's user preset root
+ *    (`<dshHome>/.agent-presets/<id>/`) instead, and 0.1.7 reads that root
+ *    never — "Nothing reads that directory any more" — so an install that ran a
+ *    previous version of this plugin still has a copy sitting there that does
+ *    nothing except look like a working preset. This half says so on the
+ *    console, once per start, and leaves the directory alone: it may well have
+ *    been edited by hand, and it costs nothing to keep.
  *
  * 2. Make the `daily-chat` workspace real before anything tries to adopt it.
  *    The client half identifies that workspace by its directory basename, so as
@@ -31,17 +32,16 @@
  *    holds at all.
  *
  * The harness home is read from `DSH_HOME` with the same default the rest of the
- * deployment uses. The first two jobs are best-effort: a failure costs a warning
- * and nothing else, because the client half already handles a missing preset (it
+ * deployment uses. Every job is best-effort: a failure costs a warning and
+ * nothing else, because the client half already handles a missing preset (it
  * falls back to the deployment default) and a missing workspace (it falls back
  * to the directory picker). The third job is silent when the services it needs
  * are absent, and simply does not lock anything.
  */
 
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 /** The durable workspace registry this row registers the daily directory in. */
 export const inject = ['workspaceRegistry'];
@@ -49,11 +49,8 @@ export const inject = ['workspaceRegistry'];
 /** The directory name the client half matches a workspace by. */
 export const DAILY_DIRECTORY = 'daily-chat';
 
-/** The preset id the client half asks a daily session to run on. */
+/** The preset id this bundle declares and the client half asks a daily session to run on. */
 export const DAILY_PRESET = 'daily';
-
-/** The composition file that makes a preset directory a preset at all. */
-const PRESET_COMPOSITION = 'agent.cordis.yml';
 
 /**
  * What a blocked preset switch says. The client half already reads this field
@@ -63,13 +60,6 @@ const PRESET_COMPOSITION = 'agent.cordis.yml';
 const LOCKED_PRESET_REASON =
   `日常聊天固定使用 ${DAILY_PRESET} 预设；要获得完整能力，请点侧边栏的「开始工作」。`;
 
-/**
- * The preset copy this package ships. Resolved relative to this module rather
- * than the process working directory, so the path holds wherever the package
- * ends up: a linked checkout, a pnpm store, an unpacked tarball.
- */
-const PRESET_SOURCE = fileURLToPath(new URL(`./preset/${DAILY_PRESET}/`, import.meta.url));
-
 /** The harness home `DSH_HOME` names, or the deployment's own default. */
 function harnessHome() {
   return typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== ''
@@ -78,26 +68,28 @@ function harnessHome() {
 }
 
 /**
- * Install this package's `daily` preset into the user preset root, unless one
- * is already there.
- * @param ctx - the Host context this row was mounted with.
+ * Report a preset directory left over from a pre-0.1.7 install.
+ *
+ * DSH 0.1.7 stopped reading `<harness home>/.agent-presets/` entirely: the
+ * `daily` preset now arrives with this bundle's patch, so a directory an older
+ * version of this plugin copied there is inert — and, because it looks exactly
+ * like an installed preset, it is the first thing worth ruling out when the
+ * roster comes up without 「日常聊天」.
+ *
+ * This one notice goes to the console rather than to `ctx.logger`: the
+ * harness's logger transport is not wired to the server's output in the
+ * deployments this plugin was checked against, and a migration notice nobody
+ * can see is worth nothing. The message carries its own `[daily-chat]` prefix
+ * for the same reason the surrounding rows print theirs.
+ *
  * @param home - the harness home.
  */
-function installDailyPreset(ctx, home) {
-  const target = join(home, '.agent-presets', DAILY_PRESET);
-
-  try {
-    // Presence of the composition file is what makes the directory a preset:
-    // an operator's own `daily` wins, an empty or half-written one is completed.
-    if (existsSync(join(target, PRESET_COMPOSITION))) return;
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(PRESET_SOURCE, target, { recursive: true });
-    ctx.logger?.info?.(`[daily-chat] installed the "${DAILY_PRESET}" preset at ${target}`);
-  } catch (reason) {
-    ctx.logger?.warn?.(
-      `[daily-chat] installing the "${DAILY_PRESET}" preset at ${target} failed: ${String(reason)}`,
-    );
-  }
+function warnAboutLegacyPreset(home) {
+  const legacy = join(home, '.agent-presets', DAILY_PRESET);
+  if (!existsSync(legacy)) return;
+  console.warn(
+    `[daily-chat] ${legacy} is no longer read (DSH 0.1.7+ takes the "${DAILY_PRESET}" preset from this bundle's patch); the directory is inert and safe to delete.`,
+  );
 }
 
 /**
@@ -186,7 +178,7 @@ function lockDailyPreset(ctx, home) {
  */
 export async function apply(ctx) {
   const home = harnessHome();
-  installDailyPreset(ctx, home);
+  warnAboutLegacyPreset(home);
   lockDailyPreset(ctx, home);
   await registerDailyWorkspace(ctx, home);
 }
