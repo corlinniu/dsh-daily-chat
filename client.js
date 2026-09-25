@@ -422,6 +422,7 @@ window.__ModuleLoader__.load({
         'remote.agentPresets',
         'uiWorkspace',
         'workspaces',
+        'sessions',
       ],
 
       apply(ctx) {
@@ -441,6 +442,8 @@ window.__ModuleLoader__.load({
 
         /** The shipped `startSession`, restored on unload. */
         let originalStartSession = undefined;
+        /** The model's own workspace read, before the work-mode projection. */
+        let readRawWorkspaces = undefined;
         /** Re-entrancy guard: starting a chat must not re-enter through the patch. */
         let starting = false;
         /** Bumped by every mode action so a slow start cannot land after a newer one. */
@@ -496,6 +499,12 @@ window.__ModuleLoader__.load({
           return segments[segments.length - 1] === DAILY_DIRECTORY && item.title === DAILY_TITLE;
         }
 
+        /** The path the Host half registers the daily workspace under, when it is known. */
+        function expectedDailyPath() {
+          const home = hostHome();
+          return home === undefined ? undefined : home + '/.dsh/' + DAILY_DIRECTORY;
+        }
+
         // A Workspace registration carries no `hidden` flag, so work mode can
         // only keep the daily row out of the sidebar by filtering the snapshot
         // the sidebar renders from. The projection is cached per raw snapshot:
@@ -519,8 +528,7 @@ window.__ModuleLoader__.load({
           if (state.mode !== 'work') return snapshot;
           const items = snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot.items;
           if (!Array.isArray(items)) return snapshot;
-          const home = hostHome();
-          const expected = home === undefined ? undefined : home + '/.dsh/' + DAILY_DIRECTORY;
+          const expected = expectedDailyPath();
           if (!items.some((item) => isDailyWorkspace(item, expected))) return snapshot;
           const cached = workModeViews.get(snapshot);
           if (cached !== undefined) return cached;
@@ -528,6 +536,88 @@ window.__ModuleLoader__.load({
             items: items.filter((item) => !isDailyWorkspace(item, expected)),
           });
           workModeViews.set(snapshot, filtered);
+          return filtered;
+        }
+
+        /* ── the work-mode session list ───────────────────────────────────────── */
+
+        /** Shared empty answer for the ordinary "no daily workspace yet" case. */
+        const NO_DAILY_IDS = new Set();
+
+        /** raw workspace snapshot → the ids its daily workspace accounts for. */
+        const dailyIdViews = new WeakMap();
+
+        /**
+         * The session ids the daily workspace accounts for.
+         *
+         * Read from the model's OWN workspace snapshot, which the projection
+         * above deliberately leaves alone: a daily chat is hidden because of
+         * what it is, so the question has to be asked of the unfiltered list.
+         * @returns the ids, empty while the baseline has not landed yet.
+         */
+        function dailySessionIds() {
+          const snapshot = readRawWorkspaces === undefined ? undefined : readRawWorkspaces();
+          const items = snapshot === null || snapshot === undefined ? undefined : snapshot.items;
+          if (!Array.isArray(items)) return NO_DAILY_IDS;
+          const cached = dailyIdViews.get(snapshot);
+          if (cached !== undefined) return cached;
+          const expected = expectedDailyPath();
+          const ids = new Set();
+          for (const item of items) {
+            if (!isDailyWorkspace(item, expected)) continue;
+            for (const id of item.sessionIds) ids.add(id);
+          }
+          dailyIdViews.set(snapshot, ids);
+          return ids;
+        }
+
+        // Hiding the daily WORKSPACE is not enough on its own: the browser
+        // builds its 未分组 group out of every Session that no VISIBLE Workspace
+        // accounts for, so the daily chats would simply move into that bucket.
+        // Work mode therefore drops them from the session list too, which is
+        // what "the two modes cannot see each other" means in practice. The
+        // projection is cached per raw snapshot for the same identity reason as
+        // the workspace one.
+        /** raw session-list snapshot → its work-mode projection. */
+        const workModeSessionViews = new WeakMap();
+
+        /**
+         * Whether one session belongs to the daily workspace.
+         * @param id - the session id.
+         * @param byId - the raw snapshot's session table.
+         * @param accounted - ids the daily workspace accounts for.
+         * @param expected - the path the Host half registers, when it is known.
+         * @returns whether work mode should keep this session out of the list.
+         */
+        function isDailySession(id, byId, accounted, expected) {
+          if (accounted.has(id)) return true;
+          const row = byId[id];
+          return row !== undefined && expected !== undefined && row.cwd === expected;
+        }
+
+        /**
+         * The session-list snapshot the sidebar may see for the active mode.
+         *
+         * Chat mode sees everything; work mode sees neither the daily workspace
+         * nor its chats. Only `ids` is projected — `byId` stays complete, so a
+         * session still open in the main column keeps its summary and its
+         * status while its row is gone from the list.
+         * @param snapshot - the store's own snapshot.
+         * @returns the snapshot to publish.
+         */
+        function visibleSessions(snapshot) {
+          if (state.mode !== 'work') return snapshot;
+          const ids = snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot.ids;
+          const byId = snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot.byId;
+          if (!Array.isArray(ids) || byId === null || typeof byId !== 'object') return snapshot;
+          const accounted = dailySessionIds();
+          const expected = expectedDailyPath();
+          const hidden = (id) => isDailySession(id, byId, accounted, expected);
+          if (!ids.some(hidden)) return snapshot;
+          const cached = workModeSessionViews.get(snapshot);
+          if (cached !== undefined) return cached;
+          const filtered = Object.assign({}, snapshot, { ids: ids.filter((id) => !hidden(id)) });
+          workModeSessionViews.set(snapshot, filtered);
           return filtered;
         }
 
@@ -1014,13 +1104,49 @@ window.__ModuleLoader__.load({
             const proto = model === null || model === undefined ? null : Object.getPrototypeOf(model);
             const original = proto === null ? undefined : proto.getSnapshot;
             if (typeof original !== 'function') return undefined;
+            // The session projection below needs the daily workspace's own
+            // account, so keep a way back to the unfiltered read.
+            readRawWorkspaces = () => original.call(model);
             proto.getSnapshot = function getSnapshot() {
               return visibleWorkspaces(original.call(this));
             };
             return () => {
               proto.getSnapshot = original;
+              readRawWorkspaces = undefined;
             };
           }, 'daily-chat: work mode hides the daily workspace');
+        });
+
+        // The daily chats go with the workspace.
+        //
+        // This store is an OBJECT, not a class instance — `createSnapshotStore`
+        // hands back an object literal with `getSnapshot` on it — so unlike the
+        // three patches above this one replaces the method on the object itself.
+        // That is enough: the browser publishes this very object as the
+        // `sessions` hook (`provideRoot({ hooks: { sessions: sessions.list } })`),
+        // so every `useSessions` reader sees the projection.
+        ctx.inject(['sessions'], (sessionCtx) => {
+          sessionCtx.effect(() => {
+            const store = sessionCtx.sessions.list;
+            if (store === null || store === undefined) return undefined;
+            const original = store.getSnapshot;
+            if (typeof original !== 'function') return undefined;
+            try {
+              store.getSnapshot = function getSnapshot() {
+                return visibleSessions(original.call(this));
+              };
+            } catch (reason) {
+              console.warn('[daily-chat] hiding the daily chats from work mode failed:', reason);
+              return undefined;
+            }
+            return () => {
+              try {
+                store.getSnapshot = original;
+              } catch (reason) {
+                console.warn('[daily-chat] restoring the session list failed:', reason);
+              }
+            };
+          }, 'daily-chat: work mode hides the daily chats');
         });
       },
     };
