@@ -95,12 +95,6 @@ window.__ModuleLoader__.load({
       empty: '还没有日常聊天，点上面开始第一句。',
       needWorkspace: '没能准备好日常聊天目录，请在弹出的选择框里挑一个文件夹。',
       failed: '打开日常聊天失败',
-      justNow: '刚刚',
-      unitMinutes: '分钟',
-      unitHours: '小时',
-      unitDays: '天',
-      unitMonths: '个月',
-      unitYears: '年',
     };
 
     const en = {
@@ -115,12 +109,6 @@ window.__ModuleLoader__.load({
       empty: 'No chats yet. Start one above.',
       needWorkspace: 'Could not prepare the chat folder — pick one in the dialog.',
       failed: 'Could not open the chat',
-      justNow: 'now',
-      unitMinutes: 'm',
-      unitHours: 'h',
-      unitDays: 'd',
-      unitMonths: 'mo',
-      unitYears: 'y',
     };
 
     const CSS = [
@@ -198,9 +186,7 @@ window.__ModuleLoader__.load({
       '.dsc-row:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
-      '.dsc-rowtext{display:flex;flex-direction:column;min-width:0;flex:1;gap:1px}',
-      '.dsc-rowtitle{overflow:hidden;font-size:13px;line-height:18px;text-overflow:ellipsis;white-space:nowrap}',
-      '.dsc-rowtime{font-size:11px;line-height:14px;color:var(--dsw-alias-label-secondary)}',
+      '.dsc-rowtitle{flex:1;min-width:0;overflow:hidden;font-size:13px;line-height:18px;text-overflow:ellipsis;white-space:nowrap}',
       '.dsc-empty{padding:10px 8px;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
     ].join('');
 
@@ -271,50 +257,6 @@ window.__ModuleLoader__.load({
       `[${MORE_MARKER}]{transition:transform .15s ease}`,
       `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
     ].join('');
-
-    /* ── relative time ────────────────────────────────────────────────────── */
-
-    const bucketOf = typeof primitives.relativeTime === 'function'
-      ? primitives.relativeTime
-      : fallbackBucket;
-
-    /** Local bucketing used only when the primitives module has no helper. */
-    function fallbackBucket(at, now) {
-      const minutes = Math.floor(Math.max(0, now - at) / 60000);
-      if (minutes < 1) return { unit: 'now', n: 0 };
-      if (minutes < 60) return { unit: 'minutes', n: minutes };
-      const hours = Math.floor(minutes / 60);
-      if (hours < 24) return { unit: 'hours', n: hours };
-      const days = Math.floor(hours / 24);
-      if (days < 30) return { unit: 'days', n: days };
-      const months = Math.floor(days / 30);
-      if (months < 12) return { unit: 'months', n: months };
-      return { unit: 'years', n: Math.floor(months / 12) };
-    }
-
-    /** The dictionary word for one bucket; the magnitude stays numeric. */
-    const UNIT_KEYS = {
-      minutes: 'unitMinutes',
-      hours: 'unitHours',
-      days: 'unitDays',
-      months: 'unitMonths',
-      years: 'unitYears',
-    };
-
-    /**
-     * Localize one dated row.
-     * @param at - epoch ms.
-     * @param now - current epoch ms.
-     * @param t - this plugin's bound translator.
-     * @returns the trailing label.
-     */
-    function timeLabel(at, now, t) {
-      if (typeof at !== 'number' || !Number.isFinite(at)) return '';
-      const bucket = bucketOf(at, now);
-      if (bucket.unit === 'now') return t('justNow');
-      const key = UNIT_KEYS[bucket.unit];
-      return key === undefined ? '' : bucket.n + t(key);
-    }
 
     /* ── mode store ───────────────────────────────────────────────────────── */
 
@@ -1050,7 +992,6 @@ window.__ModuleLoader__.load({
         function DailyRegion(props) {
           const t = props.t;
           const wide = props.wide !== false;
-          const now = Date.now();
           const workspaces = useWorkspacesOf(props);
           const sessions = useSessionsOf(props);
           const chat = useChatState();
@@ -1092,10 +1033,7 @@ window.__ModuleLoader__.load({
                     key: 'dot',
                     className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
                   }),
-                  h('span', { key: 'text', className: 'dsc-rowtext' }, [
-                    h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
-                    h('span', { key: 'time', className: 'dsc-rowtime' }, timeLabel(row.updatedAt, now, t)),
-                  ]),
+                  h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
                 ])))),
           ]);
         }
