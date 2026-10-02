@@ -70,6 +70,10 @@ window.__ModuleLoader__.load({
     const WORK_PANEL = 'daily-chat-work';
     /** The `main` panel the 「更多」 sidebar row transiently opens. */
     const MORE_PANEL = 'daily-chat-more';
+    /** Where 「更多」 sits between the two mode rows (`-20`/`-10`) and 「插件」 (0). */
+    const MORE_ORDER = -5;
+    /** Every `sidebar.panellist` id this plugin registers itself. */
+    const OWN_PANEL_IDS = new Set([DAILY_PANEL, WORK_PANEL, MORE_PANEL]);
     /** The single localStorage key holding whether the extra panel rows show. */
     const PANELS_KEY = 'dsh.daily-chat.panels';
     /** The `<html>` attribute the folded panel-list rule hangs off. */
@@ -379,6 +383,23 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Whether the 「更多」 row is on the panel list right now. The fold is only
+     * published while it is: a persisted fold whose row never appeared (or left
+     * with the last third-party plugin) would hide those rows with nothing left
+     * to unfold them.
+     */
+    let moreRowPresent = false;
+
+    /**
+     * Publish the fold, gated on the row that undoes it. Every writer goes
+     * through here — the apply effect, {@link setState} and the registration
+     * controller all have to agree on that gate.
+     */
+    function syncFoldAttribute() {
+      syncPanelsAttribute(state.panelsFolded && moreRowPresent);
+    }
+
     /** Fold the other sidebar panel rows away, or bring them back. */
     function togglePanels() {
       setState({ panelsFolded: !state.panelsFolded });
@@ -403,7 +424,7 @@ window.__ModuleLoader__.load({
         } catch (reason) {
           console.warn('[daily-chat] saving the panel list failed:', reason);
         }
-        syncPanelsAttribute(patch.panelsFolded);
+        syncFoldAttribute();
       }
       for (const listener of [...listeners]) listener();
     }
@@ -537,10 +558,14 @@ window.__ModuleLoader__.load({
         }, 'daily-chat: mode-scoped chrome');
 
         // Same contract for the panel-list fold: publish what the page loaded
-        // with, and leave every row visible when this plugin unloads.
+        // with (the 「更多」 row itself may not exist yet — that is the gate), and
+        // leave every row visible when this plugin unloads.
         ctx.effect(() => {
-          syncPanelsAttribute(state.panelsFolded);
-          return () => syncPanelsAttribute(false);
+          syncFoldAttribute();
+          return () => {
+            moreRowPresent = false;
+            syncPanelsAttribute(false);
+          };
         }, 'daily-chat: folded panel rows');
 
         /** The shipped `startSession`, restored on unload. */
@@ -1114,17 +1139,69 @@ window.__ModuleLoader__.load({
           locale: LOCALE_NS,
         }, WorkStarter));
 
+        /**
+         * Whether the panel list holds a row this plugin does not own — the only
+         * reason 「更多」 exists. `entries` is the raw ledger and stays readable
+         * before the slot is declared (an unknown key reads as empty), so this
+         * may probe ahead of plugin load order.
+         */
+        function hasForeignPanelRow() {
+          try {
+            return ctx.slots.entries('sidebar.panellist')
+              .some((entry) => !OWN_PANEL_IDS.has(entry.options.id));
+          } catch (reason) {
+            console.warn('[daily-chat] reading the panel list failed:', reason);
+            return false;
+          }
+        }
+
         // The third row of the same seat, between the mode rows and 「插件」:
         // 「更多」 folds away every row this plugin does not own. Same pair
         // contract as above — the row addresses a `main` panel, and that panel
         // is what performs the fold.
-        ctx.slots.inject('sidebar', () => ctx.slots.register({
-          name: 'sidebar.panellist',
-          id: MORE_PANEL,
-          order: -5,
-          label: () => t('more'),
-          locale: LOCALE_NS,
-        }, MoreGlyph));
+        //
+        // It only earns its place while there is something to fold. Other
+        // plugins register later than this one (and can be enabled at runtime),
+        // so the decision is re-taken on every panel-list mutation instead of
+        // once at load. The `main` panel below stays registered either way:
+        // while the row is absent nothing can activate it, and a `panellist` id
+        // with no `main` panel behind it would make `selectPanel` throw.
+        ctx.slots.inject('sidebar', () => {
+          /** Disposers for the entries registered right now, if any. */
+          let disposers = [];
+          /** Whether 「更多」 is registered at this instant. */
+          let showing = false;
+
+          const settle = () => {
+            const wanted = hasForeignPanelRow();
+            // Guarded so the register/dispose calls below — which notify this
+            // very subscription — settle instead of recursing.
+            if (wanted === showing) return;
+            showing = wanted;
+            for (const dispose of disposers.splice(0)) dispose();
+            if (wanted) {
+              disposers = [ctx.slots.register({
+                name: 'sidebar.panellist',
+                id: MORE_PANEL,
+                order: MORE_ORDER,
+                label: () => t('more'),
+                locale: LOCALE_NS,
+              }, MoreGlyph)];
+            }
+            moreRowPresent = showing;
+            syncFoldAttribute();
+          };
+
+          const unsubscribe = ctx.slots.subscribe('sidebar.panellist', settle);
+          settle();
+
+          return () => {
+            unsubscribe();
+            for (const dispose of disposers.splice(0)) dispose();
+            moreRowPresent = false;
+            syncFoldAttribute();
+          };
+        });
 
         ctx.slots.inject('main', () => ctx.slots.register({
           name: 'main',
