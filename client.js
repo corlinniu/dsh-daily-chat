@@ -12,18 +12,22 @@
  *
  * Four contributions hold that up:
  *
- * 1. Two labeled mode rows. The shipped New Session button is hand-written JSX
+ * 1. Three labeled rows. The shipped New Session button is hand-written JSX
  *    inside the sidebar shell and is wrapped by no slot, so nothing can be added
  *    beside it; the sidebar's own additive seats are the only places a plugin
  *    may appear. The one that renders a full-width icon + label row is
- *    `sidebar.panellist`, so 「日常聊天」 and 「开始工作」 live there, ordered
- *    above 「插件」 by a negative `order` (the shell sorts by it ascending, and
- *    panels default to 0). A panellist row's click is the shell's and is fixed
- *    to `selectPanel(id)`, which is why contribution 2 exists.
- * 2. Two `main` panels under those ids, one per row. Both are transient: a row
+ *    `sidebar.panellist`, so 「日常聊天」, 「开始工作」 and 「更多」 live there,
+ *    ordered above 「插件」 by a negative `order` (the shell sorts by it
+ *    ascending, and panels default to 0). A panellist row's click is the shell's
+ *    and is fixed to `selectPanel(id)`, which is why contribution 2 exists.
+ * 2. Three `main` panels under those ids, one per row. All are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
- *    centre column straight back to the conversation. That is what makes both
- *    rows land in the composer, with no page in between.
+ *    centre column straight back to the conversation. That is what makes the
+ *    mode rows land in the composer, with no page in between. 「更多」 instead
+ *    folds the rest of the panel list away by flipping one attribute on
+ *    `<html>`: the rule that reads it hides every row whose glyph does not carry
+ *    this plugin's marker, so rows other plugins add are folded too, and no
+ *    foreign registration is touched.
  * 3. The daily session list in `sidebar.workspaces`. Work mode leaves that slot
  *    completely alone: our entry is registered with `priority: -1`, and for a
  *    `single` slot the LOWEST live priority renders, so ours wins while it is
@@ -64,11 +68,22 @@ window.__ModuleLoader__.load({
     const DAILY_PANEL = 'daily-chat';
     /** The `main` panel the 「开始工作」 sidebar row transiently opens. */
     const WORK_PANEL = 'daily-chat-work';
+    /** The `main` panel the 「更多」 sidebar row transiently opens. */
+    const MORE_PANEL = 'daily-chat-more';
+    /** The single localStorage key holding whether the extra panel rows show. */
+    const PANELS_KEY = 'dsh.daily-chat.panels';
+    /** The `<html>` attribute the folded panel-list rule hangs off. */
+    const PANELS_ATTRIBUTE = 'data-dsc-panels';
+    /** The glyph marker that tells this plugin's rows from every other one. */
+    const ROW_MARKER = 'data-dsc-keep';
+    /** The glyph marker the 「更多」 chevron turns over on. */
+    const MORE_MARKER = 'data-dsc-more';
 
     const zh = {
       dismiss: '知道了',
       dailyChats: '日常聊天',
       startWork: '开始工作',
+      more: '更多',
       newChat: '新建日常聊天',
       lockedProject: '日常聊天固定在自己的工作区，不能切换项目。要开始工作，请点侧边栏的「开始工作」。',
       starting: '正在打开日常聊天…',
@@ -88,6 +103,7 @@ window.__ModuleLoader__.load({
       dismiss: 'Dismiss',
       dailyChats: 'Chats',
       startWork: 'Start working',
+      more: 'More',
       newChat: 'New chat',
       lockedProject: 'A chat stays in its own workspace — use “Start working” in the sidebar to open a project.',
       starting: 'Opening chat…',
@@ -230,11 +246,26 @@ window.__ModuleLoader__.load({
      * description as its `title`, with the glyph as its own first child. The
      * other occupants of that slot (jobs, schedule, terminal, cost meter) are
      * buttons or `<div>`s, so the shape selects exactly one element.
+     *
+     * The last rules are the 「更多」 fold. The sidebar paints one row per
+     * `sidebar.panellist` entry, and a row's only handles are its hashed classes,
+     * its localized `aria-label` and `aria-current` — no entry id, so this plugin
+     * cannot name the rows it does not own. It can mark its own: every glyph it
+     * registers carries `data-dsc-keep`, and the fold hides every row whose
+     * button holds no such marker. That keeps working when another plugin adds a
+     * row later, and the whole fold is one attribute on `<html>`, so no entry has
+     * to be unmounted or re-registered. The failure mode is the one above: if the
+     * panel list's class or shape changes, nothing matches and every row is
+     * simply visible again. `:has()` needs Chromium 105+, which every Electron
+     * and browser this deployment runs on is well past.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
       `html[${MODE_ATTRIBUTE}="daily"] [class*="heroWorkspaceRow"]{display:none !important}`,
       `html[${MODE_ATTRIBUTE}="daily"] [data-slot="conversation.session.header.actions"] > span[title] > svg{display:none !important}`,
+      `html[${PANELS_ATTRIBUTE}="more"] nav[class*="panelList"] button:not(:has([${ROW_MARKER}])){display:none !important}`,
+      `[${MORE_MARKER}]{transition:transform .15s ease}`,
+      `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
     ].join('');
 
     /* ── relative time ────────────────────────────────────────────────────── */
@@ -294,7 +325,22 @@ window.__ModuleLoader__.load({
       }
     }
 
-    let state = { mode: readMode(), busy: false, error: null };
+    /**
+     * Read the persisted panel-list state. Anything unreadable — and anything a
+     * previous version wrote — means unfolded, which is also what an unloaded
+     * plugin leaves behind: every row visible.
+     */
+    function readPanels() {
+      try {
+        if (typeof localStorage === 'undefined') return false;
+        return localStorage.getItem(PANELS_KEY) === 'more';
+      } catch (reason) {
+        console.warn('[daily-chat] reading the saved panel list failed:', reason);
+        return false;
+      }
+    }
+
+    let state = { mode: readMode(), panelsFolded: readPanels(), busy: false, error: null };
     const listeners = new Set();
 
     /**
@@ -315,6 +361,29 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Reflect whether the extra panel rows are folded away. Same contract as
+     * {@link syncModeAttribute}: the CSS this plugin injects is static, so the
+     * state has to be readable from the DOM. Unfolded means the attribute is
+     * absent, which is what the page starts as and what an unloaded plugin
+     * leaves behind — every sidebar row visible.
+     * @param folded - whether the rows other than this plugin's own are hidden.
+     */
+    function syncPanelsAttribute(folded) {
+      try {
+        if (typeof document === 'undefined') return;
+        if (folded) document.documentElement.setAttribute(PANELS_ATTRIBUTE, 'more');
+        else document.documentElement.removeAttribute(PANELS_ATTRIBUTE);
+      } catch (reason) {
+        console.warn('[daily-chat] publishing the panel list to the document failed:', reason);
+      }
+    }
+
+    /** Fold the other sidebar panel rows away, or bring them back. */
+    function togglePanels() {
+      setState({ panelsFolded: !state.panelsFolded });
+    }
+
     /** Merge one state patch, persist the mode, and notify every reader. */
     function setState(patch) {
       state = Object.assign({}, state, patch);
@@ -325,6 +394,16 @@ window.__ModuleLoader__.load({
           console.warn('[daily-chat] saving the mode failed:', reason);
         }
         syncModeAttribute(patch.mode);
+      }
+      if (patch.panelsFolded !== undefined) {
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(PANELS_KEY, patch.panelsFolded ? 'more' : 'all');
+          }
+        } catch (reason) {
+          console.warn('[daily-chat] saving the panel list failed:', reason);
+        }
+        syncPanelsAttribute(patch.panelsFolded);
       }
       for (const listener of [...listeners]) listener();
     }
@@ -394,6 +473,7 @@ window.__ModuleLoader__.load({
         viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': true,
         fill: 'none', stroke: 'currentColor', strokeWidth: 1.8,
         strokeLinecap: 'round', strokeLinejoin: 'round',
+        [ROW_MARKER]: '',
       }, h('path', {
         d: 'M4.5 6.4A2.4 2.4 0 0 1 6.9 4h10.2a2.4 2.4 0 0 1 2.4 2.4v6a2.4 2.4 0 0 1-2.4 2.4h-5.2L7.6 18.6v-3.8H6.9a2.4 2.4 0 0 1-2.4-2.4z',
       }));
@@ -406,11 +486,27 @@ window.__ModuleLoader__.load({
         viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': true,
         fill: 'none', stroke: 'currentColor', strokeWidth: 1.8,
         strokeLinecap: 'round', strokeLinejoin: 'round',
+        [ROW_MARKER]: '',
       }, [
         h('rect', { key: 'frame', x: 3.4, y: 4.4, width: 17.2, height: 15.2, rx: 2.4 }),
         h('path', { key: 'caret', d: 'M7.6 10.2l2.3 2.1-2.3 2.1' }),
         h('path', { key: 'line', d: 'M12.6 14.6h4' }),
       ]);
+    }
+
+    /**
+     * A chevron, for the row that folds the others away. Same seat contract as
+     * {@link ChatGlyph}, plus the two markers the frame-wide rules key off: this
+     * is a row the plugin owns, and this is the glyph that turns over.
+     */
+    function MoreGlyph(props) {
+      const size = typeof props.size === 'number' ? props.size : 16;
+      return h('svg', {
+        viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': true,
+        fill: 'none', stroke: 'currentColor', strokeWidth: 1.8,
+        strokeLinecap: 'round', strokeLinejoin: 'round',
+        [ROW_MARKER]: '', [MORE_MARKER]: '',
+      }, h('path', { d: 'M7.6 10.2l4.4 4.2 4.4-4.2' }));
     }
 
     return {
@@ -439,6 +535,13 @@ window.__ModuleLoader__.load({
           syncModeAttribute(state.mode);
           return () => syncModeAttribute('work');
         }, 'daily-chat: mode-scoped chrome');
+
+        // Same contract for the panel-list fold: publish what the page loaded
+        // with, and leave every row visible when this plugin unloads.
+        ctx.effect(() => {
+          syncPanelsAttribute(state.panelsFolded);
+          return () => syncPanelsAttribute(false);
+        }, 'daily-chat: folded panel rows');
 
         /** The shipped `startSession`, restored on unload. */
         let originalStartSession = undefined;
@@ -864,6 +967,28 @@ window.__ModuleLoader__.load({
         });
 
         /**
+         * 「更多」: fold the other sidebar rows away, then hand the centre column
+         * straight back. Like the two mode rows this is a row that ACTS — the
+         * shell owns the click and only knows `selectPanel(id)` — so it answers
+         * for its own `main` key. It paints nothing: the swap is a flip of one
+         * `<html>` attribute, and the single frame it costs is not worth a
+         * placeholder line.
+         */
+        function MoreStarter(props) {
+          const active = typeof props.usePanelInfo === 'function'
+            ? props.usePanelInfo((info) => info.activePanelId === MORE_PANEL)
+            : false;
+
+          React.useEffect(() => {
+            if (!active) return;
+            togglePanels();
+            ctx.layout.selectPanel(null);
+          }, [active]);
+
+          return null;
+        }
+
+        /**
          * Carries the chrome adjustments, mounted unconditionally on the
          * frame-wide overlay layer so they apply in every mode. Rendering a
          * `<style>` element means unmounting the plugin takes the rules away
@@ -952,7 +1077,7 @@ window.__ModuleLoader__.load({
 
         /* ── registration ─────────────────────────────────────────────────── */
 
-        // The labeled entry points: two full-width rows at the TOP of the
+        // The labeled entry points: three full-width rows at the TOP of the
         // sidebar's global panel list — above 「插件」, which sits at order 0 —
         // rendered by the shell as icon + label like every other panel row. The
         // shell owns the buttons and calls `selectPanel(id)`, so each panellist
@@ -988,6 +1113,24 @@ window.__ModuleLoader__.load({
           key: WORK_PANEL,
           locale: LOCALE_NS,
         }, WorkStarter));
+
+        // The third row of the same seat, between the mode rows and 「插件」:
+        // 「更多」 folds away every row this plugin does not own. Same pair
+        // contract as above — the row addresses a `main` panel, and that panel
+        // is what performs the fold.
+        ctx.slots.inject('sidebar', () => ctx.slots.register({
+          name: 'sidebar.panellist',
+          id: MORE_PANEL,
+          order: -5,
+          label: () => t('more'),
+          locale: LOCALE_NS,
+        }, MoreGlyph));
+
+        ctx.slots.inject('main', () => ctx.slots.register({
+          name: 'main',
+          key: MORE_PANEL,
+          locale: LOCALE_NS,
+        }, MoreStarter));
 
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
