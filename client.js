@@ -18,8 +18,11 @@
  *    may appear. The one that renders a full-width icon + label row is
  *    `sidebar.panellist`, so 「日常聊天」, 「开始工作」 and 「更多」 live there,
  *    ordered above 「插件」 by a negative `order` (the shell sorts by it
- *    ascending, and panels default to 0). A panellist row's click is the shell's
- *    and is fixed to `selectPanel(id)`, which is why contribution 2 exists.
+ *    ascending, and panels default to 0). The third of them is conditional: a
+ *    panel list of three rows or fewer needs no fold, so 「更多」 is registered
+ *    only while a fourth menu is there to hide. A panellist row's click is the
+ *    shell's and is fixed to `selectPanel(id)`, which is why contribution 2
+ *    exists.
  * 2. Three `main` panels under those ids, one per row. All are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
  *    centre column straight back to the conversation. That is what makes the
@@ -72,8 +75,13 @@ window.__ModuleLoader__.load({
     const MORE_PANEL = 'daily-chat-more';
     /** Where 「更多」 sits between the two mode rows (`-20`/`-10`) and 「插件」 (0). */
     const MORE_ORDER = -5;
-    /** Every `sidebar.panellist` id this plugin registers itself. */
-    const OWN_PANEL_IDS = new Set([DAILY_PANEL, WORK_PANEL, MORE_PANEL]);
+    /**
+     * How many panel rows the list may hold before 「更多」 earns a row of its
+     * own. Three fit: the two mode rows plus the shipped 「插件」 — the panel
+     * list a stock deployment has — and the fourth row is where a fold starts
+     * paying for itself.
+     */
+    const PANEL_ROW_LIMIT = 3;
     /** The single localStorage key holding whether the extra panel rows show. */
     const PANELS_KEY = 'dsh.daily-chat.panels';
     /** The `<html>` attribute the folded panel-list rule hangs off. */
@@ -1078,15 +1086,21 @@ window.__ModuleLoader__.load({
         }, WorkStarter));
 
         /**
-         * Whether the panel list holds a row this plugin does not own — the only
-         * reason 「更多」 exists. `entries` is the raw ledger and stays readable
-         * before the slot is declared (an unknown key reads as empty), so this
-         * may probe ahead of plugin load order.
+         * Whether the panel list is long enough to want 「更多」.
+         *
+         * The count is over every row the list would show without it — this
+         * plugin's two mode rows included, because those are rows the operator
+         * reads — and only past {@link PANEL_ROW_LIMIT} of them does the fold
+         * earn its place. Up to the limit the rows are all left standing; the
+         * shrunken list stays honest about what is there. `entries` is the raw
+         * ledger and stays readable before the slot is declared (an unknown key
+         * reads as empty), so this may probe ahead of plugin load order.
          */
-        function hasForeignPanelRow() {
+        function needsMoreRow() {
           try {
             return ctx.slots.entries('sidebar.panellist')
-              .some((entry) => !OWN_PANEL_IDS.has(entry.options.id));
+              .filter((entry) => entry.options.id !== MORE_PANEL)
+              .length > PANEL_ROW_LIMIT;
           } catch (reason) {
             console.warn('[daily-chat] reading the panel list failed:', reason);
             return false;
@@ -1098,12 +1112,14 @@ window.__ModuleLoader__.load({
         // contract as above — the row addresses a `main` panel, and that panel
         // is what performs the fold.
         //
-        // It only earns its place while there is something to fold. Other
+        // It only earns its place past {@link PANEL_ROW_LIMIT} rows. Other
         // plugins register later than this one (and can be enabled at runtime),
         // so the decision is re-taken on every panel-list mutation instead of
-        // once at load. The `main` panel below stays registered either way:
-        // while the row is absent nothing can activate it, and a `panellist` id
-        // with no `main` panel behind it would make `selectPanel` throw.
+        // once at load — which also means the row appears when the fourth menu
+        // arrives and leaves again when one goes. The `main` panel below stays
+        // registered either way: while the row is absent nothing can activate
+        // it, and a `panellist` id with no `main` panel behind it would make
+        // `selectPanel` throw.
         ctx.slots.inject('sidebar', () => {
           /** Disposers for the entries registered right now, if any. */
           let disposers = [];
@@ -1111,7 +1127,7 @@ window.__ModuleLoader__.load({
           let showing = false;
 
           const settle = () => {
-            const wanted = hasForeignPanelRow();
+            const wanted = needsMoreRow();
             // Guarded so the register/dispose calls below — which notify this
             // very subscription — settle instead of recursing.
             if (wanted === showing) return;
