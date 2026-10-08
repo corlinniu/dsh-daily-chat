@@ -10,7 +10,7 @@
  *         is 用户消息 → 模型 → 工具调用 → 回复.
  *   工作  exactly the shipped behaviour, untouched.
  *
- * Four contributions hold that up:
+ * Five contributions hold that up:
  *
  * 1. Three labeled rows. The shipped New Session button is hand-written JSX
  *    inside the sidebar shell and is wrapped by no slot, so nothing can be added
@@ -39,6 +39,20 @@
  *    Session entry point calls, the sidebar shell's own button included — so
  *    that button starts a daily chat instead of a work session while 日常 is
  *    the active mode.
+ * 5. The elapsed line in a settled Turn's footer. DSH measures a Turn's duration
+ *    already — `turn.end.time - turn.start.time`, floored at a second — but
+ *    paints it only inside the Turn process header, which every shipped display
+ *    mode except 「完全展开」 folds away the moment the Turn settles, so the
+ *    figure is unreadable exactly when it is wanted. `conversation.chat.turnTail`
+ *    is the one seat a settled Turn always paints, and the `turn` prop it hands
+ *    over is the same location the header reads, so the line moves an existing
+ *    number instead of measuring a second time. The seat that would hold it on
+ *    the row with the usage figure and the clock is the row's own, and the only
+ *    way into that row is its `extraActions`, fed by
+ *    `conversation.chat.assistant-actions` — so the figure is published from the
+ *    first seat and painted by the second, which is what {@link TurnDuration}
+ *    and {@link TurnElapsed} are. It is not mode-gated on purpose: the question
+ *    it answers does not depend on the mode.
  *
  * Daily chats are Sessions in a dedicated workspace, so "daily" is a durable
  * place rather than a UI flag: the history survives, and the lists are just the
@@ -90,6 +104,35 @@ window.__ModuleLoader__.load({
     const ROW_MARKER = 'data-dsc-keep';
     /** The glyph marker the 「更多」 chevron turns over on. */
     const MORE_MARKER = 'data-dsc-more';
+    /** The class the elapsed line and its two parts carry. */
+    const TURN_CLASS = 'dsc-took';
+    /** The line as the turnTail seat paints it: under the action row, on its own. */
+    const TURN_FALLBACK_CLASS = 'dsc-took-fallback';
+    /** The line as the action row paints it: in-row, after the usage figure. */
+    const TURN_INLINE_CLASS = 'dsc-took-inline';
+    /** The hidden carrier the turnTail seat publishes its numbers through. */
+    const TURN_FACT_CLASS = 'dsc-took-facts';
+    /** The attribute a settled Turn's container carries. */
+    const TURN_ROOT_MARKER = 'data-turn-tail';
+    /** Milliseconds this Turn took, on the carrier. */
+    const TURN_FACT_ELAPSED = 'data-dsc-elapsed';
+    /** Why this Turn ended (`aborted` / `error` / empty), on the carrier. */
+    const TURN_FACT_REASON = 'data-dsc-reason';
+    /** When this Turn started, epoch ms, on the carrier. */
+    const TURN_FACT_START = 'data-dsc-start';
+    /** When this Turn ended, epoch ms, on the carrier. */
+    const TURN_FACT_END = 'data-dsc-end';
+    /** The turnTail seat's contribution id — the carrier, not the painted line. */
+    const TURN_CONTRIBUTION = 'daily-chat-turn-took';
+    /** The action row's contribution id — the painted line. */
+    const TURN_INLINE_CONTRIBUTION = 'daily-chat-turn-took-inline';
+    /**
+     * Where the elapsed line sits among its seat's contributions: last, so it
+     * comes after another plugin's block instead of splitting the reply from it.
+     * Which of the two seats it ends up painting in is not this number's doing —
+     * see {@link TURN_CSS} and {@link TurnElapsed}.
+     */
+    const TURN_ORDER = 20;
 
     const zh = {
       dismiss: '知道了',
@@ -103,6 +146,12 @@ window.__ModuleLoader__.load({
       empty: '还没有日常聊天，点上面开始第一句。',
       needWorkspace: '没能准备好日常聊天目录，请在弹出的选择框里挑一个文件夹。',
       failed: '打开日常聊天失败',
+      turnTook: '用时',
+      turnStopped: '已中断，用时',
+      turnFailed: '已出错，用时',
+      hourUnit: '小时',
+      minuteUnit: '分',
+      secondUnit: '秒',
     };
 
     const en = {
@@ -117,6 +166,12 @@ window.__ModuleLoader__.load({
       empty: 'No chats yet. Start one above.',
       needWorkspace: 'Could not prepare the chat folder — pick one in the dialog.',
       failed: 'Could not open the chat',
+      turnTook: 'Took',
+      turnStopped: 'Stopped after',
+      turnFailed: 'Failed after',
+      hourUnit: 'h ',
+      minuteUnit: 'm ',
+      secondUnit: 's',
     };
 
     const CSS = [
@@ -264,6 +319,31 @@ window.__ModuleLoader__.load({
       `html[${PANELS_ATTRIBUTE}="more"] nav[class*="panelList"] button:not(:has([${ROW_MARKER}])){display:none !important}`,
       `[${MORE_MARKER}]{transition:transform .15s ease}`,
       `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
+    ].join('');
+
+    /**
+     * The elapsed line's own rules, shipped with the components rather than with
+     * {@link CHROME_CSS} so the line carries its styling to whichever surface
+     * paints it, and the same colour ramp as the shipped footer chrome around it.
+     *
+     * The line has two faces. The one that normally paints is {@link TurnElapsed},
+     * inside the copy/branch/time row, where `order: 1` puts it after that row's
+     * own usage figure and clock — the row is a flex line and the slot's anchor
+     * div is `display: contents`, so this rule lands on the flex item itself. The
+     * other face, {@link TurnDuration}'s, is the stand-in used when the row is not
+     * there to paint into (a Turn the chat view has not finalized, a surface that
+     * renders the seat without a row): it stays on its own line under the row,
+     * where the negative top margin shaves the column's 16px gap down to the same
+     * 4px the row's own `margin-top: 4px` sets. The first face, once painted,
+     * retires the second — no surface shows both.
+     */
+    const TURN_CSS = [
+      `.${TURN_FACT_CLASS}{display:none}`,
+      `.${TURN_FALLBACK_CLASS}{order:1;display:flex;align-items:baseline;gap:6px;margin:-12px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}`,
+      `.${TURN_INLINE_CLASS}{order:1;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);line-height:calc(24px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums}`,
+      `[${TURN_ROOT_MARKER}]:has(.${TURN_INLINE_CLASS}) .${TURN_FALLBACK_CLASS}{display:none}`,
+      `.${TURN_CLASS}-label{color:var(--dsw-alias-label-secondary)}`,
+      `.${TURN_CLASS}-value{color:var(--dsw-alias-label-tertiary)}`,
     ].join('');
 
     /* ── mode store ───────────────────────────────────────────────────────── */
@@ -478,6 +558,204 @@ window.__ModuleLoader__.load({
         strokeLinecap: 'round', strokeLinejoin: 'round',
         [ROW_MARKER]: '', [MORE_MARKER]: '',
       }, h('path', { d: 'M7.6 10.2l4.4 4.2 4.4-4.2' }));
+    }
+
+    /* ── settled-turn elapsed line ────────────────────────────────────────── */
+
+    /**
+     * Render an elapsed span the way the shipped Turn process header does.
+     *
+     * The units and their trailing spacing are copied from DSH's own `duration.*`
+     * messages rather than invented: the shipped header prints hours only past an
+     * hour, minutes only past a minute, and always prints the seconds — so 90s is
+     * 「1分30秒」 and 3600s is 「1小时0分0秒」. English units carry a trailing space
+     * ("1h 2m 5s"); Chinese ones do not ("1小时2分5秒").
+     *
+     * @param ms - elapsed milliseconds; negatives clamp and fractions floor.
+     * @param t - translate seat bound to {@link LOCALE_NS}.
+     * @returns the figure as text, ready to concatenate onto its label.
+     */
+    function formatElapsed(ms, t) {
+      const total = Math.max(0, Math.floor(ms / 1000));
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor(total / 60) % 60;
+      const seconds = total % 60;
+      let text = '';
+      if (hours > 0) text += String(hours) + t('hourUnit');
+      if (total >= 60) text += String(minutes) + t('minuteUnit');
+      return text + String(seconds) + t('secondUnit');
+    }
+
+    /**
+     * Which of the three labels a Turn's elapsed line opens with.
+     *
+     * Aborted and failed Turns DO keep their figure here, unlike in the shipped
+     * header, where the two are labelled 「已停止」/「失败」 with no number: the
+     * question this line answers is how long the Turn took, and an interrupted
+     * Turn took exactly as long as it took. The label says which happened so the
+     * number is not read as a completed answer.
+     */
+    function turnLabel(reason, t) {
+      if (reason === 'aborted') return t('turnStopped');
+      if (reason === 'error') return t('turnFailed');
+      return t('turnTook');
+    }
+
+    /** The absolute span a Turn's elapsed line summarizes, for its tooltip. */
+    function turnTitle(start, end) {
+      if (start === undefined || end === undefined) return undefined;
+      return `${new Date(start).toLocaleString()} → ${new Date(end).toLocaleString()}`;
+    }
+
+    /** Whether two readings off the carrier are the same reading. */
+    function sameTurnFacts(left, right) {
+      if (left === right) return true;
+      if (left === undefined || right === undefined) return false;
+      return left.elapsed === right.elapsed
+        && left.reason === right.reason
+        && left.start === right.start
+        && left.end === right.end;
+    }
+
+    /**
+     * Read back the numbers {@link TurnDuration} published for the Turn this
+     * action row closes.
+     *
+     * The action row's seat is told which *message* it belongs to, not which
+     * Turn, and the chat store keeps no message-to-Turn index (the only way
+     * across is a walk of every node in the session). The carrier makes the
+     * crossing free instead of merely cheap: both seats are rendered by DSH into
+     * the same `[data-turn-tail]` box, the carrier is already in the DOM by the
+     * time this row's layout effect runs, and one `closest` plus one `querySelector`
+     * is all it takes to get from the row to the numbers.
+     *
+     * @param element - the row's own node, or null before it exists.
+     * @returns the reading, or undefined when this Turn has no carrier to read.
+     */
+    function readTurnFacts(element) {
+      if (element === null || element === undefined) return undefined;
+      const container = element.closest('[' + TURN_ROOT_MARKER + ']');
+      if (container === null) return undefined;
+      const carrier = container.querySelector('.' + TURN_FACT_CLASS);
+      if (carrier === null) return undefined;
+      const elapsed = Number(carrier.getAttribute(TURN_FACT_ELAPSED));
+      if (!Number.isFinite(elapsed)) return undefined;
+      const reason = carrier.getAttribute(TURN_FACT_REASON);
+      const start = Number(carrier.getAttribute(TURN_FACT_START));
+      const end = Number(carrier.getAttribute(TURN_FACT_END));
+      return {
+        elapsed: elapsed,
+        reason: reason === null || reason === '' ? undefined : reason,
+        start: Number.isFinite(start) ? start : undefined,
+        end: Number.isFinite(end) ? end : undefined,
+      };
+    }
+
+    /**
+     * The elapsed figure of a settled Turn, published for whichever of the two
+     * faces ends up painting it.
+     *
+     * DSH already measures this — `turn.end.time - turn.start.time`, floored at
+     * one second — but paints it only inside the Turn process header, and every
+     * shipped display mode except 「完全展开」 folds that header away the moment a
+     * Turn settles. A settled Turn therefore shows no duration at all anywhere.
+     * This component is the carrier half: it reads the two timestamps off the
+     * `conversation.chat.turnTail` seat, states them on a hidden node, and keeps
+     * a visible line of its own only as a fallback for the surfaces where
+     * {@link TurnElapsed} cannot reach that node.
+     *
+     * Nothing is invented and nothing is faked: a Turn whose `turn/start` fell
+     * outside the loaded window carries no `start`, and one that never settled
+     * carries no `end` — both draw nothing rather than a zero.
+     *
+     * @param props.turn - the settled Turn location, straight from the seat.
+     * @param props.t - translate seat bound to {@link LOCALE_NS}.
+     * @returns the carrier and its fallback line, or null when there is nothing
+     *   to show.
+     */
+    function TurnDuration(props) {
+      const turn = props.turn;
+      const t = props.t;
+      if (turn === undefined || turn.status !== 'closed') return null;
+      if (turn.start === undefined || turn.end === undefined) return null;
+      const reason = turn.end.data === undefined || turn.end.data.reason === undefined
+        ? undefined
+        : turn.end.data.reason.kind;
+      // The shipped header's floor, for the same reason: a pause that took less
+      // than a second reads as 0, and 0 reads as a bug.
+      const elapsed = Math.max(1000, turn.end.time - turn.start.time);
+      return h(React.Fragment, null, [
+        h('style', { key: 'css' }, TURN_CSS),
+        h('span', {
+          key: 'facts',
+          className: TURN_FACT_CLASS,
+          [TURN_FACT_ELAPSED]: String(elapsed),
+          [TURN_FACT_REASON]: reason === undefined ? '' : reason,
+          [TURN_FACT_START]: String(turn.start.time),
+          [TURN_FACT_END]: String(turn.end.time),
+        }),
+        h('span', {
+          key: 'fallback',
+          className: `${TURN_CLASS} ${TURN_FALLBACK_CLASS}`,
+          title: turnTitle(turn.start.time, turn.end.time),
+        }, [
+          h('span', { key: 'label', className: `${TURN_CLASS}-label` }, turnLabel(reason, t)),
+          h('span', { key: 'value', className: `${TURN_CLASS}-value` }, formatElapsed(elapsed, t)),
+        ]),
+      ]);
+    }
+
+    /**
+     * The same figure, painted on the action row's own line.
+     *
+     * This contribution lives in `conversation.chat.assistant-actions`, the seat
+     * DSH hands to the row's `extraActions` — the only way into that row — and
+     * `order: 1` in {@link TURN_CSS} is what moves it past the row's own usage
+     * figure and clock rather than leaving it in front of the branch button.
+     *
+     * It paints nothing until it has read the carrier: a Turn that never settled,
+     * or a row DSH rendered without its Turn's tail, has no figure to show, and a
+     * row that quietly shows none is better than one that shows a guess.
+     *
+     * @param props - standard seat props; only `t` is needed.
+     */
+    function TurnElapsed(props) {
+      const t = props.t;
+      const holder = React.useRef(null);
+      const retried = React.useRef(false);
+      const [facts, setFacts] = React.useState(undefined);
+      // The carrier lands in the same commit as this row, so a layout effect
+      // reads it a paint early and the line never flashes in late.
+      React.useLayoutEffect(() => {
+        const found = readTurnFacts(holder.current);
+        setFacts((previous) => (sameTurnFacts(previous, found) ? previous : found));
+        // Carrier and row come from two different seats, so a surface that gains
+        // one of them a commit later would strand the figure on the fallback
+        // line. One deferred re-read covers that, and a read that stays empty
+        // changes nothing — the fallback line is already showing.
+        if (found !== undefined || retried.current) return;
+        retried.current = true;
+        requestAnimationFrame(() => {
+          setFacts((previous) => {
+            const late = readTurnFacts(holder.current);
+            return sameTurnFacts(previous, late) ? previous : late;
+          });
+        });
+      });
+      if (facts === undefined) {
+        // Not hidden by CSS: the class is what the fallback watches for, so an
+        // empty first pass must not wear it.
+        return h('span', { key: 'anchor', ref: holder, style: { display: 'none' } });
+      }
+      return h('span', {
+        key: 'line',
+        ref: holder,
+        className: `${TURN_CLASS} ${TURN_INLINE_CLASS}`,
+        title: turnTitle(facts.start, facts.end),
+      }, [
+        h('span', { key: 'label', className: `${TURN_CLASS}-label` }, turnLabel(facts.reason, t)),
+        h('span', { key: 'value', className: `${TURN_CLASS}-value` }, formatElapsed(facts.elapsed, t)),
+      ]);
     }
 
     return {
@@ -1208,6 +1486,35 @@ window.__ModuleLoader__.load({
             }
           };
         });
+
+        // The elapsed line in a settled Turn's footer — its two faces.
+        //
+        // `conversation.chat.turnTail` is the seat DSH paints once per settled
+        // Turn; the `turn` it hands over is the same Turn location the shipped
+        // process header reads its duration from, so nothing has to be
+        // subscribed to, stored or recomputed here. What is registered on it is
+        // the carrier: the numbers, plus the line as it looks when the action
+        // row below is not there to paint into.
+        //
+        // `conversation.chat.assistant-actions` is the other face, and the only
+        // seat DSH renders *inside* the copy/branch/time row itself. Reading the
+        // carrier back from there is what puts the figure on the row's own line,
+        // after the usage figure and the clock, instead of on a line of its own.
+        // Both seats are registered for both modes on purpose: the figure is
+        // DSH's own and the line only ever repeats what the shipped header would
+        // have shown had the default display modes not folded it away.
+        ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
+          name: 'conversation.chat.turnTail',
+          id: TURN_CONTRIBUTION,
+          order: TURN_ORDER,
+          locale: LOCALE_NS,
+        }, TurnDuration));
+        ctx.slots.inject('conversation.chat.assistant-actions', () => ctx.slots.register({
+          name: 'conversation.chat.assistant-actions',
+          id: TURN_INLINE_CONTRIBUTION,
+          order: TURN_ORDER,
+          locale: LOCALE_NS,
+        }, TurnElapsed));
 
         // Two shipped navigation methods carry chat mode's two refusals.
         //
