@@ -191,12 +191,10 @@ window.__ModuleLoader__.load({
       // The region and its section header mirror the shipped browser's own
       // geometry, declaration for declaration. `.bhn1Oq_root` insets itself by
       // `--dsh-sidebar-inline-padding`, which `regionArea` has already handed
-      // back to the sidebar's own gutter; `.bhn1Oq_sectionHeader` is the shipped
-      // 36px row with `margin-bottom:4px` and `padding-left:4px`, which the
-      // column's pitch drops to 30px and a 2px margin for both halves (see
-      // {@link SIDEBAR_CSS}); and its label carries no type of its own — it
-      // inherits the sidebar's own scale (13px) and the header's tertiary ink,
-      // with `max-width:45%` so it can never crowd the controls.
+      // back to the sidebar's own gutter; `.bhn1Oq_sectionHeader` is a 36px row
+      // with `margin-bottom:4px` and `padding-left:4px`; and its label carries no
+      // type of its own — it inherits the sidebar's 14px and the header's
+      // tertiary ink, with `max-width:45%` so it can never crowd the controls.
       //
       // One rule in that stylesheet is NOT mirrored, because it does not land:
       // `.bhn1Oq_root:not(.bhn1Oq_rail) .bhn1Oq_sectionHeader` also declares
@@ -214,7 +212,7 @@ window.__ModuleLoader__.load({
       // its actions entirely, while this header always has the add control to
       // place. With the label hidden in the rail the single remaining child sits
       // at the start either way, so the distribution needs no rail override.
-      '.dsc-head{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:4px;height:30px;margin-top:0;margin-bottom:2px;padding-left:4px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;overflow:hidden}',
+      '.dsc-head{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:4px;height:36px;margin-top:2px;margin-bottom:4px;padding-left:4px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;overflow:hidden}',
       '.dsc-title{white-space:nowrap;min-width:0;max-width:45%;flex:none;line-height:20px;overflow:hidden}',
       // A rail is for picking a mode, not for browsing or for starting one. The
       // shipped browser renders neither its label nor its list when collapsed;
@@ -247,7 +245,7 @@ window.__ModuleLoader__.load({
       // scrollbar minus offset — 2px — which puts the rows' right edge where
       // 工作's rows put theirs.
       '.dsc-list{display:flex;flex-direction:column;gap:1px;flex:1;min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));padding-bottom:16px;scrollbar-gutter:stable;overflow-y:auto}',
-      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:5px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
+      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
       '.dsc-row:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
@@ -321,78 +319,6 @@ window.__ModuleLoader__.load({
       `html[${PANELS_ATTRIBUTE}="more"] nav[class*="panelList"] button:not(:has([${ROW_MARKER}])){display:none !important}`,
       `[${MORE_MARKER}]{transition:transform .15s ease}`,
       `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
-    ].join('');
-
-    /**
-     * The sidebar column itself, matched by structure rather than by name.
-     *
-     * The column has no id, no `data-*` and no seat of its own — its only stable
-     * handles are the shipped CSS-module local names. `footArea` is the one to
-     * use: it is a local name of `@deepseek-ai/dsh-client-ui-sidebar`, it is
-     * rendered unconditionally, and nothing else in this deployment renders one,
-     * so `:has(> …)` picks out exactly that column and nothing beside it.
-     * (`panelList` would be ambiguous: the shell drops the whole `<nav>` when no
-     * panel entry is registered, and the rail already needs that name for the
-     * fold.)
-     */
-    const SIDEBAR_COLUMN = 'div:has(> div[class*="footArea"])';
-
-    /**
-     * The sidebar's own scale: 13px type, and the pitch that goes with it.
-     *
-     * Type. The column declares `font-size: 14px` on its root and lets every
-     * role that carries no type of its own inherit it — the panel rows
-     * (「日常聊天」/「开始工作」/「更多」/「插件」), the workspace browser's
-     * labels, and the header of the daily region. This drops the whole column to
-     * 13px, which is also the size the daily rows already carry, so the column
-     * reads as one scale instead of two. Four shipped roles pin 14px instead of
-     * inheriting it, and a root override never reaches a declaration, so they
-     * come down too: the session / workspace row title (`title`), the browser's
-     * search-result title (`searchResultTitle`), its inline rename box
-     * (`renameInput`) and the settings launcher in the foot (`trigger`). Those
-     * say `inherit` rather than `13px`, so the whole set follows the root.
-     *
-     * Pitch. The shell drew its rows for 14px, and 13px text in a 36px row reads
-     * loose — the column looked sparse the moment the type came down. Every
-     * shipped row therefore drops one step: panel rows 36 → 32 (with the 22px
-     * line-height and 7px padding that made the 36), section headers and the
-     * settings launcher 36/42 → 30/36, workspace rows 34 → 30, session rows
-     * 32 → 28. The panel list's 4px gap becomes 2px, the section header's 4px
-     * bottom margin becomes 2px, and the daily region carries the same numbers in
-     * {@link CSS}, declaration for declaration — its rows were already 13px, and
-     * this is what keeps the two halves of the column reading as one list.
-     *
-     * The pitch rules hang off the expanded column only. The rail is a 36px icon
-     * column with a geometry of its own (`.collapsed .panelRow` is a 36×36 box,
-     * `.collapsed .panelList` keeps a 12px gap, `.railRow` its 8/10px margins),
-     * and every one of these selectors outranks those on specificity — without
-     * `:not([class*="collapsed"])` the rail's icons would cram together.
-     *
-     * Matching is case-sensitive and keyed on the local name, which makes
-     * `title` deliberately narrow: the column's other titles (`panelTitle`,
-     * `localBuildTitle`, `navTitle`, the hover card's `hoverTitle`) are either
-     * inheriting already or belong to a surface of their own — the brand's build
-     * stamp is a deliberate 12px, and the settings modal is portalled out of this
-     * subtree altogether. Our own `dsc-*` classes are excluded from the title
-     * rule because their sizes are set on purpose, not inherited. As with
-     * {@link CHROME_CSS}, a renamed local name means the rule stops matching and
-     * that role simply goes back to the shipped value.
-     */
-    const SIDEBAR_CSS = [
-      // The column's type, one step down from the shell's 14px.
-      `${SIDEBAR_COLUMN}{font-size:13px}`,
-      `${SIDEBAR_COLUMN} [class*="title"]:not([class*="dsc-"]){font-size:inherit}`,
-      `${SIDEBAR_COLUMN} [class*="searchResultTitle"]{font-size:inherit}`,
-      `${SIDEBAR_COLUMN} [class*="renameInput"]{font-size:inherit}`,
-      `${SIDEBAR_COLUMN} [class*="trigger"]{font-size:inherit}`,
-      // ...and the pitch that keeps 13px from reading loose.
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) [class*="panelList"]{gap:2px;margin-bottom:4px}`,
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) [class*="panelRow"]{min-height:32px;padding:6px 8px;line-height:20px}`,
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) [class*="sectionHeader"]{height:30px;margin-bottom:2px}`,
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) [class*="projectRow"]{height:30px}`,
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) [class*="sessionRow"]{height:28px}`,
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) [class*="triggerRow"]{margin:2px -2px}`,
-      `${SIDEBAR_COLUMN}:not([class*="collapsed"]) button[class*="trigger"]{height:36px;line-height:20px}`,
     ].join('');
 
     /**
@@ -1316,13 +1242,13 @@ window.__ModuleLoader__.load({
         }
 
         /**
-         * Carries the chrome adjustments and the sidebar's type scale, mounted
-         * unconditionally on the frame-wide overlay layer so they apply in every
-         * mode. Rendering a `<style>` element means unmounting the plugin takes
-         * the rules away with it.
+         * Carries the chrome adjustments, mounted unconditionally on the
+         * frame-wide overlay layer so they apply in every mode. Rendering a
+         * `<style>` element means unmounting the plugin takes the rules away
+         * with it.
          */
         function ChromeStyle() {
-          return h('style', null, CHROME_CSS + SIDEBAR_CSS);
+          return h('style', null, CHROME_CSS);
         }
 
         /**
