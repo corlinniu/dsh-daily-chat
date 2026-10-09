@@ -193,8 +193,9 @@ window.__ModuleLoader__.load({
       // `--dsh-sidebar-inline-padding`, which `regionArea` has already handed
       // back to the sidebar's own gutter; `.bhn1Oq_sectionHeader` is a 36px row
       // with `margin-bottom:4px` and `padding-left:4px`; and its label carries no
-      // type of its own — it inherits the sidebar's 14px and the header's
-      // tertiary ink, with `max-width:45%` so it can never crowd the controls.
+      // type of its own — it inherits the sidebar's own scale (13px, see
+      // {@link SIDEBAR_TYPE_CSS}) and the header's tertiary ink, with
+      // `max-width:45%` so it can never crowd the controls.
       //
       // One rule in that stylesheet is NOT mirrored, because it does not land:
       // `.bhn1Oq_root:not(.bhn1Oq_rail) .bhn1Oq_sectionHeader` also declares
@@ -319,6 +320,54 @@ window.__ModuleLoader__.load({
       `html[${PANELS_ATTRIBUTE}="more"] nav[class*="panelList"] button:not(:has([${ROW_MARKER}])){display:none !important}`,
       `[${MORE_MARKER}]{transition:transform .15s ease}`,
       `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
+    ].join('');
+
+    /**
+     * The sidebar's type scale: one step down from the shell's own 14px.
+     *
+     * The sidebar column declares `font-size: 14px` on its root and lets every
+     * role that carries no type of its own inherit it — the panel rows
+     * (「日常聊天」/「开始工作」/「更多」/「插件」), the workspace browser's
+     * labels, and the header of the daily region above. This drops the whole
+     * column to 13px, which is also the size the daily rows already carry, so
+     * the column reads as one scale instead of two.
+     *
+     * The root has no id, no `data-*` and no seat of its own — its only stable
+     * handles are the shipped CSS-module local names. `footArea` is the one to
+     * use: it is a local name of `@deepseek-ai/dsh-client-ui-sidebar`, it is
+     * rendered unconditionally, and nothing else in this deployment renders one,
+     * so `:has(> …)` picks out exactly that column and nothing beside it.
+     * (`panelList` would be ambiguous: the shell drops the whole `<nav>` when no
+     * panel entry is registered, and the rail already needs that name for the
+     * fold.) The rule wins on specificity, not on order: the shell's own
+     * `font-size` sits on `.root` (0,1,0) and this selector is (0,1,2).
+     *
+     * The remaining rules lower the shipped roles that pin 14px instead of
+     * inheriting it — a root override alone never reaches a declaration. They
+     * say `inherit` rather than `13px` so the whole set follows the root
+     * wherever it goes:
+     *
+     * - the session / workspace row title (`title`);
+     * - the browser's search-result title (`searchResultTitle`);
+     * - the browser's inline rename box (`renameInput`);
+     * - the settings launcher in the foot (`trigger`).
+     *
+     * Matching is case-sensitive and keyed on the local name, which makes
+     * `title` deliberately narrow: the column's other titles (`panelTitle`,
+     * `localBuildTitle`, `navTitle`, the hover card's `hoverTitle`) are either
+     * inheriting already or belong to a surface of their own — the brand's
+     * build stamp is a deliberate 12px, and the settings modal is portalled out
+     * of this subtree altogether. Our own `dsc-*` classes are excluded because
+     * their sizes are set on purpose, not inherited. As with {@link CHROME_CSS},
+     * a renamed local name means the rule stops matching and that role simply
+     * goes back to 14px.
+     */
+    const SIDEBAR_TYPE_CSS = [
+      'div:has(> div[class*="footArea"]){font-size:13px}',
+      'div:has(> div[class*="footArea"]) [class*="title"]:not([class*="dsc-"]){font-size:inherit}',
+      'div:has(> div[class*="footArea"]) [class*="searchResultTitle"]{font-size:inherit}',
+      'div:has(> div[class*="footArea"]) [class*="renameInput"]{font-size:inherit}',
+      'div:has(> div[class*="footArea"]) [class*="trigger"]{font-size:inherit}',
     ].join('');
 
     /**
@@ -1242,13 +1291,13 @@ window.__ModuleLoader__.load({
         }
 
         /**
-         * Carries the chrome adjustments, mounted unconditionally on the
-         * frame-wide overlay layer so they apply in every mode. Rendering a
-         * `<style>` element means unmounting the plugin takes the rules away
-         * with it.
+         * Carries the chrome adjustments and the sidebar's type scale, mounted
+         * unconditionally on the frame-wide overlay layer so they apply in every
+         * mode. Rendering a `<style>` element means unmounting the plugin takes
+         * the rules away with it.
          */
         function ChromeStyle() {
-          return h('style', null, CHROME_CSS);
+          return h('style', null, CHROME_CSS + SIDEBAR_TYPE_CSS);
         }
 
         /**
