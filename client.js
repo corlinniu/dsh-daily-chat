@@ -311,6 +311,25 @@ window.__ModuleLoader__.load({
      * panel list's class or shape changes, nothing matches and every row is
      * simply visible again. `:has()` needs Chromium 105+, which every Electron
      * and browser this deployment runs on is well past.
+     *
+     * The last rule repaints the sidebar column. On macOS the shell gives that
+     * column a translucent wash over the window's vibrancy — a gradient plus a
+     * `color-mix`, with a dark variant of its own — while the surface beside it
+     * (the conversation column, the right panel, the bottom row) is flat
+     * `--dsw-alias-bg-base`. The column therefore reads as a different surface,
+     * and over a bright wallpaper as a different colour outright. The rule gives
+     * it the same `--dsw-alias-bg-base` the rest of the frame paints;
+     * `background` rather than `background-color` is what clears the shipped
+     * gradient. It carries `!important` because the shipped rules are out of
+     * reach otherwise: the light one is `(0,2,0)`, but its dark variant
+     * `[data-platform=darwin] [data-ds-dark-theme] .sidebarCol` is `(0,3,0)`, and
+     * the `prefers-reduced-transparency` branch states the fill a third way. It
+     * is scoped to macOS on purpose: on Windows the caption band the shell paints
+     * above the column, and the frame behind it, are
+     * `--dsw-specific-sidebar-fill`, so a flat `bg-base` column would trade one
+     * seam for another. The divider survives either way — `sidebarCol` drops its
+     * own border-right on darwin, and the conversation column draws the
+     * `border-left` between them.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
@@ -319,6 +338,7 @@ window.__ModuleLoader__.load({
       `html[${PANELS_ATTRIBUTE}="more"] nav[class*="panelList"] button:not(:has([${ROW_MARKER}])){display:none !important}`,
       `[${MORE_MARKER}]{transition:transform .15s ease}`,
       `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
+      'html[data-platform="darwin"] div[class*="sidebarCol"]{background:var(--dsw-alias-bg-base) !important}',
     ].join('');
 
     /**
