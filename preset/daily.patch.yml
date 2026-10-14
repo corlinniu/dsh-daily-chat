@@ -72,7 +72,9 @@
             name: '@deepseek-ai/dsh-tool-web'
             config:
               fetch: true
-              searchTimeoutMs: 60000
+              # Fail fast: one search costs a full model round-trip, and a
+              # stalled query is worse than a quick failure the user can retry.
+              searchTimeoutMs: 15000
 
           - id: tool-ask-user
             name: '@deepseek-ai/dsh-tool-ask-user'
