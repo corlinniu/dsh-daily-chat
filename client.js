@@ -311,6 +311,30 @@ window.__ModuleLoader__.load({
      * panel list's class or shape changes, nothing matches and every row is
      * simply visible again. `:has()` needs Chromium 105+, which every Electron
      * and browser this deployment runs on is well past.
+     *
+     * One more rule hides the provisional New Session row. Every New Session
+     * entry — 「日常聊天」, 「开始工作」, the shell's own button — opens a Session
+     * that has no content yet, and until the first prompt is accepted DSH paints
+     * exactly that Session in the tree as the selected 「新会话」 placeholder: its
+     * title is localized, and it carries no timestamp. That row is there from the
+     * click, so a workspace browser shows a conversation the user has not had;
+     * this rule is what keeps the list to conversations that exist.
+     *
+     * It is identified by SHAPE, not by name. `data-row-key="session:…"` is the
+     * tree row's own non-hashed handle, and the timestamp cell and the row-actions
+     * cell are both rendered `!row.blank && …`, so the placeholder is the only
+     * Session row that carries neither. Both anchors have to be missing to match,
+     * which is also what bounds the failure: renaming ONE class leaves the other
+     * anchor in place, so the rule still hides the placeholder and still skips
+     * every real row (a real row keeps the other cell). Only a release that
+     * changes BOTH suffixes — or drops both cells — would read a real row as the
+     * placeholder and hide it; the shared `!row.blank` gate is what rules that out
+     * today. Nothing has to bring the row back either: `blank` clears when
+     * the first prompt is ACCEPTED (a refused prompt leaves it set), and the next
+     * render paints an ordinary row. The two workspace and session projections
+     * above are deliberately left alone by this: DSH reuses a blank Session when
+     * the same entry point is clicked again, and that reuse reads the very ids a
+     * projection would have to hide.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
@@ -319,6 +343,7 @@ window.__ModuleLoader__.load({
       `html[${PANELS_ATTRIBUTE}="more"] nav[class*="panelList"] button:not(:has([${ROW_MARKER}])){display:none !important}`,
       `[${MORE_MARKER}]{transition:transform .15s ease}`,
       `html:not([${PANELS_ATTRIBUTE}="more"]) [${MORE_MARKER}]{transform:rotate(180deg)}`,
+      '[data-row-key^="session:"]:not(:has(> [class*="_time"])):not(:has(> [class*="_rowActions"])){display:none !important}',
     ].join('');
 
     /**
