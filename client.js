@@ -1093,6 +1093,111 @@ window.__ModuleLoader__.load({
         }
 
         /**
+         * The Host code a failed create carried, when it carried one.
+         *
+         * The client hands a create failure over as a `SessionCreateError` whose
+         * own `rpcError` holds the Host's code, so the code is the difference
+         * between "this deployment has no `daily` preset" and every other
+         * failure.
+         * @param reason - the thrown create failure.
+         * @returns the code, or undefined.
+         */
+        function hostErrorCode(reason) {
+          if (reason === null || typeof reason !== 'object') return undefined;
+          if (typeof reason.code === 'string') return reason.code;
+          const rpc = reason.rpcError;
+          if (rpc === null || typeof rpc !== 'object' || typeof rpc.code !== 'string') return undefined;
+          return rpc.code;
+        }
+
+        /**
+         * Whether the daily workspace already holds the blank Session a create
+         * would reuse.
+         *
+         * Answered from a FRESH snapshot, with the predicate DSH's own
+         * `createInWorkspace` picks its blank with, because that fact decides
+         * whether the fallback below may run: a blank means the create will
+         * compose a Session that already exists, and no blank means it mints a
+         * new one. Re-resolving the workspace here rather than reading the item
+         * `resolveDailyWorkspace` handed over keeps both reads on one snapshot
+         * version — the create re-resolves its workspace too.
+         *
+         * Anything it cannot read counts as "there is something to reuse": the
+         * caller's conservative answer is to keep the original failure.
+         * @param workspaceId - the daily workspace's id.
+         * @returns whether a reuse is possible.
+         */
+        function hasReusableBlank(workspaceId) {
+          try {
+            const registry = ctx.workspaces.list.getSnapshot();
+            const items = registry === null || registry === undefined ? undefined : registry.items;
+            if (!Array.isArray(items)) return true;
+            const workspace = items.find((item) => item.workspaceId === workspaceId);
+            if (workspace === undefined) return false;
+            const sessions = ctx.sessions.list.getSnapshot();
+            const byId = sessions === null || sessions === undefined ? undefined : sessions.byId;
+            const ids = sessions === null || sessions === undefined ? undefined : sessions.ids;
+            if (byId === null || typeof byId !== 'object' || !Array.isArray(ids)) return true;
+            const archived = Array.isArray(registry.archivedSessionIds) ? registry.archivedSessionIds : [];
+            return ids.some((id) => {
+              const row = byId[id];
+              return row !== undefined
+                && row.blank
+                && row.cwd === workspace.path
+                && workspace.sessionIds.indexOf(id) !== -1
+                && archived.indexOf(id) === -1;
+            });
+          } catch (reason) {
+            console.warn('[daily-chat] reading the workspace for a reusable blank Session failed:', reason);
+            return true;
+          }
+        }
+
+        /**
+         * Open the daily workspace's blank Session, asking for the daily preset
+         * as part of the request instead of composing it afterwards.
+         *
+         * `connectWorkspace` opens the blank Session a workspace already has —
+         * its second argument is what puts it in that reuse branch at all — and
+         * DSH composes a reused or minted blank with the preset the create
+         * request NAMES, falling back to the deployment default when it names
+         * none. That default is what a daily chat may not run on (see the Host
+         * half's preset lock), so the unnamed request is refused and the whole
+         * create fails with `failed to create session: … 日常聊天固定使用 daily
+         * 预设…`. Clicking 「日常聊天」 a second time is exactly that request: the
+         * first click already put the blank on `daily`, so the second one asked
+         * to put it back on the default. Naming `daily` makes the request agree
+         * with the Session it reuses, and a workspace with no blank mints the new
+         * Session on `daily` directly rather than composing it on the default and
+         * switching afterwards.
+         *
+         * The fallback keeps the degradation this plugin documents elsewhere — a
+         * deployment whose roster lost `daily` still opens the chat on its default
+         * preset, with a warning — and it retries ONLY when both halves of that
+         * case hold: the create failed because the preset could not be resolved
+         * (every other failure is reported instead of retried, which also keeps a
+         * half-finished create from being run twice), and the workspace has
+         * nothing to reuse. The reuse branch is precisely the one that cannot
+         * reach the default: it composes the Session it reuses, the Host lock
+         * refuses every non-daily preset for a Session in the daily directory,
+         * and retrying through it would hand the user back the very error this
+         * function exists to avoid.
+         * @param workspace - the resolved daily workspace.
+         * @returns the Session the workspace opened.
+         */
+        async function connectDailySession(workspace) {
+          try {
+            return await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId, { agentPreset: DAILY_PRESET });
+          } catch (reason) {
+            const code = hostErrorCode(reason);
+            const missingPreset = code === 'agent-preset/not-found' || code === 'agent-preset/invalid';
+            if (!missingPreset || hasReusableBlank(workspace.workspaceId)) throw reason;
+            console.warn(`[daily-chat] the "${DAILY_PRESET}" preset is unavailable; opening on the deployment default instead:`, reason);
+            return await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
+          }
+        }
+
+        /**
          * Start (or reuse the blank) daily session and compose it on the daily
          * preset.
          *
@@ -1106,7 +1211,9 @@ window.__ModuleLoader__.load({
          * mode hides the daily workspace from the snapshot (see
          * {@link visibleWorkspaces}) and both the resolution and the connect
          * below read that snapshot. A start that fails puts the previous mode
-         * back, so a refusal leaves the sidebar exactly as it was.
+         * back and hands the centre column back with it, so a refusal leaves the
+         * sidebar and the composer exactly as they were instead of parking the
+         * middle column on the placeholder line a transient panel paints.
          */
         async function startDailyChat() {
           if (starting) return;
@@ -1117,7 +1224,7 @@ window.__ModuleLoader__.load({
           try {
             const workspace = await resolveDailyWorkspace();
             if (ticket !== startTicket) return;
-            const sessionId = await ctx.uiWorkspace.connectWorkspace(workspace.workspaceId);
+            const sessionId = await connectDailySession(workspace);
             if (ticket !== startTicket) return;
             setState({ busy: false, error: null });
             ctx.layout.selectPanel(null);
@@ -1131,6 +1238,7 @@ window.__ModuleLoader__.load({
             console.warn('[daily-chat] starting a daily chat failed:', reason);
             if (ticket !== startTicket) return;
             setState({ mode: previous, busy: false, error: `${t('failed')}：${describe(reason)}` });
+            ctx.layout.selectPanel(null);
           } finally {
             starting = false;
           }
