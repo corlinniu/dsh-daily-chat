@@ -34,7 +34,10 @@
  * 3. The daily session list in `sidebar.workspaces`. Work mode leaves that slot
  *    completely alone: our entry is registered with `priority: -1`, and for a
  *    `single` slot the LOWEST live priority renders, so ours wins while it is
- *    registered and the shipped browser returns the moment it is disposed.
+ *    registered and the shipped browser returns the moment it is disposed. A
+ *    row is that browser's own row minus what a daily chat cannot do: status
+ *    dot, title, and the same trailing relative age (`relativeTime` plus the
+ *    same thresholds), refreshed on a clock because this list can sit idle.
  * 4. A prototype patch of `uiWorkspace.startSession` — the one method every New
  *    Session entry point calls, the sidebar shell's own button included — so
  *    that button starts a daily chat instead of a work session while 日常 is
@@ -149,6 +152,12 @@ window.__ModuleLoader__.load({
       turnTook: '用时',
       turnStopped: '已中断，用时',
       turnFailed: '已出错，用时',
+      timeNow: '刚刚',
+      timeMinutes: '{n}分钟',
+      timeHours: '{n}小时',
+      timeDays: '{n}天',
+      timeMonths: '{n}个月',
+      timeYears: '{n}年',
       hourUnit: '小时',
       minuteUnit: '分',
       secondUnit: '秒',
@@ -169,6 +178,12 @@ window.__ModuleLoader__.load({
       turnTook: 'Took',
       turnStopped: 'Stopped after',
       turnFailed: 'Failed after',
+      timeNow: 'now',
+      timeMinutes: '{n}min',
+      timeHours: '{n}h',
+      timeDays: '{n}d',
+      timeMonths: '{n}mo',
+      timeYears: '{n}y',
       hourUnit: 'h ',
       minuteUnit: 'm ',
       secondUnit: 's',
@@ -250,6 +265,13 @@ window.__ModuleLoader__.load({
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
       '.dsc-rowtitle{flex:1;min-width:0;overflow:hidden;font-size:13px;line-height:18px;text-overflow:ellipsis;white-space:nowrap}',
+      // The trailing age cell is the workspace browser's `.time`, declaration
+      // for declaration (see @deepseek-ai/dsh-client-ui-workspace's
+      // Rows.module.css): 10px/16px in the tertiary ink, taking no width from
+      // the title. One deliberate difference: the workspace row swaps this cell
+      // for its hover actions, while a daily row has no actions to swap in, so
+      // the age stays put in every row state.
+      '.dsc-rowtime{flex:none;font-size:10px;line-height:16px;color:var(--dsw-alias-label-tertiary)}',
       '.dsc-empty{padding:10px 8px;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
     ].join('');
 
@@ -370,6 +392,97 @@ window.__ModuleLoader__.load({
       `.${TURN_CLASS}-label{color:var(--dsw-alias-label-secondary)}`,
       `.${TURN_CLASS}-value{color:var(--dsw-alias-label-tertiary)}`,
     ].join('');
+
+    /* ── relative time ────────────────────────────────────────────────────── */
+
+    /**
+     * The workspace browser's own bucketing, when primitives ships it: below a
+     * minute reads 「刚刚」, then minutes below the hour, hours below the day,
+     * days below 30, months below the year, then years. Sharing the helper is
+     * what makes a daily row and a 工作 row age in the same words at the same
+     * thresholds instead of two similar-but-not-equal ladders.
+     */
+    const bucketOf = typeof primitives.relativeTime === 'function'
+      ? primitives.relativeTime
+      : fallbackBucket;
+
+    /**
+     * Local bucketing used only when the primitives module carries no helper.
+     * Same thresholds and units as `relativeTime`, so the fallback changes
+     * nothing about what a row reads — only where the number came from.
+     * @param at - the row's `updatedAt`, epoch ms.
+     * @param now - current epoch ms.
+     * @returns the bucket unit and its magnitude.
+     */
+    function fallbackBucket(at, now) {
+      const diff = Math.max(0, now - at);
+      const minutes = Math.floor(diff / 60000);
+      if (minutes < 1) return { unit: 'now', n: 0 };
+      if (minutes < 60) return { unit: 'minutes', n: minutes };
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return { unit: 'hours', n: hours };
+      const days = Math.floor(hours / 24);
+      if (days < 30) return { unit: 'days', n: days };
+      const months = Math.floor(days / 30);
+      if (months < 12) return { unit: 'months', n: months };
+      return { unit: 'years', n: Math.floor(months / 12) };
+    }
+
+    /** The dictionary key for one bucket; the magnitude stays a number. */
+    const UNIT_KEYS = {
+      minutes: 'timeMinutes',
+      hours: 'timeHours',
+      days: 'timeDays',
+      months: 'timeMonths',
+      years: 'timeYears',
+    };
+
+    /**
+     * Localize one row's age in the compact form the workspace rows use —
+     * `5分钟` / `3小时` / `22天`, never a trailing 「前」: the cell sits beside
+     * the title, not in a sentence. The magnitude goes through the dictionary
+     * rather than a hand-built number + word pair, so a language pack can put
+     * the number anywhere in its own template.
+     * @param at - the row's `updatedAt`, epoch ms; anything non-finite paints nothing.
+     * @param now - current epoch ms.
+     * @param t - this plugin's bound translator.
+     * @returns the trailing label, or an empty string when there is no usable time.
+     */
+    function timeLabel(at, now, t) {
+      if (typeof at !== 'number' || !Number.isFinite(at)) return '';
+      const bucket = bucketOf(at, now);
+      if (bucket.unit === 'now') return t('timeNow');
+      const key = UNIT_KEYS[bucket.unit];
+      return key === undefined ? '' : t(key, { n: bucket.n });
+    }
+
+    /**
+     * How often the rows re-read the clock. A relative label names whole
+     * minutes (or hours / days), so half a minute keeps it correct to its own
+     * granularity without repainting a mounted sidebar on every frame.
+     */
+    const RELATIVE_CLOCK_PERIOD_MS = 30000;
+
+    /**
+     * Current epoch ms, re-sampled on {@link RELATIVE_CLOCK_PERIOD_MS}.
+     *
+     * The workspace browser samples `Date.now()` while it renders and gets away
+     * with it: that tree repaints on every session and workspace event. The
+     * daily list can sit untouched for hours — a chat opened at 09:00 and never
+     * touched again would keep saying `5分钟` — so it owns a clock instead. The
+     * cost is one callback per period while the region is mounted, and the
+     * region only exists in 日常: switching to 工作 unmounts it and the timer
+     * goes with it.
+     * @returns epoch milliseconds, updated once per period.
+     */
+    function useRelativeClock() {
+      const [now, setNow] = React.useState(() => Date.now());
+      React.useEffect(() => {
+        const timer = setInterval(() => { setNow(Date.now()); }, RELATIVE_CLOCK_PERIOD_MS);
+        return () => { clearInterval(timer); };
+      }, []);
+      return now;
+    }
 
     /* ── mode store ───────────────────────────────────────────────────────── */
 
@@ -1407,13 +1520,25 @@ window.__ModuleLoader__.load({
 
         /* ── the daily browsing region ────────────────────────────────────── */
 
-        /** The session list that stands in for the workspace browser in chat mode. */
+        /**
+         * The session list that stands in for the workspace browser in chat mode.
+         *
+         * A row is that browser's row minus everything a daily chat cannot do:
+         * the status dot (running), the title, and the trailing relative age —
+         * same words, same thresholds and same 10px tertiary cell as 工作's own
+         * rows, because the two lists sit one mode apart and must not disagree
+         * about how old a conversation is. No row actions, so nothing takes the
+         * age cell's place on hover.
+         */
         function DailyRegion(props) {
           const t = props.t;
           const wide = props.wide !== false;
           const workspaces = useWorkspacesOf(props);
           const sessions = useSessionsOf(props);
           const chat = useChatState();
+          // One clock for the whole list: every row's age is read against the
+          // same instant, so two rows that are the same age never disagree.
+          const now = useRelativeClock();
 
           const rows = dailyRows(workspaces, sessions);
 
@@ -1453,6 +1578,13 @@ window.__ModuleLoader__.load({
                     className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
                   }),
                   h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
+                  // Trailing age, the way a workspace row carries it: the title
+                  // cell keeps `flex:1` and clips, so the label never squeezes
+                  // the title to nothing and never wraps.
+                  h('span', {
+                    key: 'time',
+                    className: 'dsc-rowtime',
+                  }, timeLabel(row.updatedAt, now, t)),
                 ])))),
           ]);
         }
