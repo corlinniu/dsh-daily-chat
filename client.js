@@ -264,8 +264,13 @@ window.__ModuleLoader__.load({
       // workspace browser is a fixed 32px; this row is that row minus its slot
       // and its hover actions, so it spends those 32px the same way — the
       // title's 20px line box (below) plus 6px of vertical padding.
-      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
-      '.dsc-row:hover{background:var(--dsw-alias-bg-layer-2)}',
+      // The row's hover paint is 工作's own: the same
+      // `--dsw-alias-interactive-bg-hover` (a translucent ink, not a solid
+      // layer) inside the same `--dsw-radius-md` corner. A daily row has no
+      // hover actions to show, but the highlight it sits under is the one the
+      // session row next to it uses.
+      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:var(--dsw-radius-md)}',
+      '.dsc-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
       // The title is the workspace browser's `.title`, declaration for
