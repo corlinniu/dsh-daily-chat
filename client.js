@@ -260,11 +260,21 @@ window.__ModuleLoader__.load({
       // scrollbar minus offset — 2px — which puts the rows' right edge where
       // 工作's rows put theirs.
       '.dsc-list{display:flex;flex-direction:column;gap:1px;flex:1;min-height:0;margin-left:-4px;margin-right:var(--dsh-session-list-scrollbar-offset);padding-left:4px;padding-right:calc(var(--dsh-session-list-edge-inset) - var(--dsh-session-list-scrollbar-width) - var(--dsh-session-list-scrollbar-offset));padding-bottom:16px;scrollbar-gutter:stable;overflow-y:auto}',
-      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
+      // The row keeps 工作's own session-row height. `YDXeBa_sessionRow` in the
+      // workspace browser is a fixed 32px; this row is that row minus its slot
+      // and its hover actions, so it spends those 32px the same way — the
+      // title's 20px line box (below) plus 6px of vertical padding.
+      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:8px}',
       '.dsc-row:hover{background:var(--dsw-alias-bg-layer-2)}',
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
-      '.dsc-rowtitle{flex:1;min-width:0;overflow:hidden;font-size:13px;line-height:18px;text-overflow:ellipsis;white-space:nowrap}',
+      // The title is the workspace browser's `.title`, declaration for
+      // declaration (see @deepseek-ai/dsh-client-ui-workspace's
+      // Rows.module.css): 14px/20px — the one type size this column draws its
+      // session names in. The 13px/18px this replaces was a leftover of the
+      // once-tried whole-column 13px (reverted), which left this list a size
+      // smaller than the list it stands in for, in the same column.
+      '.dsc-rowtitle{flex:1;min-width:0;overflow:hidden;font-size:14px;line-height:20px;text-overflow:ellipsis;white-space:nowrap}',
       // The trailing age cell is the workspace browser's `.time`, declaration
       // for declaration (see @deepseek-ai/dsh-client-ui-workspace's
       // Rows.module.css): 10px/16px in the tertiary ink, taking no width from
