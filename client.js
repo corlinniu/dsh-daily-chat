@@ -287,6 +287,12 @@ window.__ModuleLoader__.load({
       // for its hover actions, while a daily row has no actions to swap in, so
       // the age stays put in every row state.
       '.dsc-rowtime{flex:none;font-size:10px;line-height:16px;color:var(--dsw-alias-label-tertiary)}',
+      // The page trigger. It is neither a row nor a control: a 1px strip at the
+      // end of the painted window that only the observer looks at. It needs a
+      // box — a zero-area target is not reliably reported as intersecting —
+      // takes no pointer, paints nothing, and as a `<div>` stays out of the tab
+      // order. Scrolling it into view is what asks for the next page.
+      '.dsc-pager{flex:none;height:1px;pointer-events:none}',
       '.dsc-empty{padding:10px 8px;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
     ].join('');
 
@@ -1408,6 +1414,74 @@ window.__ModuleLoader__.load({
         }
 
         /**
+         * How many rows one page adds to the daily list.
+         *
+         * The rows are all in the snapshot already — this window decides what
+         * gets painted, not what gets fetched. An account with hundreds of
+         * conversations therefore mounts one page of buttons on open and one
+         * more page each time the list reaches its end, instead of mounting
+         * every row before the first paint.
+         */
+        const ROW_PAGE = 20;
+
+        /**
+         * The sliding window of daily rows the mounted list has painted.
+         *
+         * The window belongs to the list, not to the snapshot: a row arriving,
+         * leaving or being renamed re-cuts the same window and must never push
+         * rows below it back out of reach. Entering 日常 remounts the region, so
+         * the window starts over at one page there.
+         *
+         * The end of the list is a 1px `.dsc-pager` strip watched by an
+         * IntersectionObserver rooted at the scroll container. That is one
+         * browser-maintained comparison instead of a scroll handler, and it also
+         * covers a viewport tall enough to show the whole page: the strip is in
+         * view on mount, so the next page loads even though no wheel event can
+         * ever reach the bottom of a list that does not overflow yet.
+         *
+         * The effect re-arms after every page (`visible` is a dependency)
+         * because a viewport may be tall enough to show two or three pages: an
+         * observer kept on the same node only fires on threshold CROSSINGS, so
+         * once the strip stays inside the viewport it would never ask again.
+         * Re-observing publishes the current state instead, and the window keeps
+         * growing until the list overflows or runs out — never leaving a
+         * non-scrollable list with rows stranded behind it.
+         *
+         * @param rows - the rows the list would paint without a window.
+         * @returns `visible` (rows to paint), `more` (whether any wait behind
+         *   them), `listRef` (the scroll container) and `sentinelRef` (the
+         *   trigger strip).
+         */
+        function usePagedRows(rows) {
+          const [visible, setVisible] = React.useState(ROW_PAGE);
+          const listRef = React.useRef(null);
+          const sentinelRef = React.useRef(null);
+          const total = rows.length;
+          const more = total > visible;
+
+          React.useEffect(() => {
+            if (!more) return undefined;
+            const scroll = listRef.current;
+            const sentinel = sentinelRef.current;
+            if (scroll === null || sentinel === null) return undefined;
+            if (typeof IntersectionObserver !== 'function') {
+              // No observer (an old webview): paint everything. A window that
+              // can never grow would hide rows with nothing left to reveal them.
+              setVisible(total);
+              return undefined;
+            }
+            const observer = new IntersectionObserver((entries) => {
+              if (!entries.some((entry) => entry.isIntersecting)) return;
+              setVisible((painted) => Math.min(painted + ROW_PAGE, total));
+            }, { root: scroll, rootMargin: '120px 0px' });
+            observer.observe(sentinel);
+            return () => { observer.disconnect(); };
+          }, [more, total, visible]);
+
+          return { visible, more, listRef, sentinelRef };
+        }
+
+        /**
          * The standard-prop workspace reader, with a stable empty fallback so an
          * absent source degrades to an empty list instead of a crash.
          * @param props - the composed slot props.
@@ -1556,6 +1630,9 @@ window.__ModuleLoader__.load({
           const now = useRelativeClock();
 
           const rows = dailyRows(workspaces, sessions);
+          // The list paints one page at a time and adds a page whenever its
+          // 1px end strip scrolls into view; see {@link usePagedRows}.
+          const paged = usePagedRows(rows);
 
           return h('div', { className: 'dsc-region' + (wide ? '' : ' dsc-rail') }, [
             h('style', { key: 'css' }, CSS),
@@ -1579,9 +1656,9 @@ window.__ModuleLoader__.load({
             // The wrapper the shipped browser wraps its own list in; see the
             // `.dsc-listArea` rule for why the scrollbar needs it.
             h('div', { className: 'dsc-listArea', key: 'listArea' },
-              h('div', { className: 'dsc-list', key: 'list' }, rows.length === 0
+              h('div', { className: 'dsc-list', key: 'list', ref: paged.listRef }, rows.length === 0
                 ? h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'))
-                : rows.map((row) => h('button', {
+                : rows.slice(0, paged.visible).map((row) => h('button', {
                   key: row.id,
                   type: 'button',
                   className: 'dsc-row',
@@ -1600,7 +1677,12 @@ window.__ModuleLoader__.load({
                     key: 'time',
                     className: 'dsc-rowtime',
                   }, timeLabel(row.updatedAt, now, t)),
-                ])))),
+                ])).concat(paged.more ? [h('div', {
+                  key: 'more',
+                  className: 'dsc-pager',
+                  ref: paged.sentinelRef,
+                  'aria-hidden': 'true',
+                })] : []))),
           ]);
         }
 
