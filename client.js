@@ -5,9 +5,10 @@
  * This plugin splits it into two, the way ChatGPT splits chat from work:
  *
  *   日常  a lightweight conversation agent. Its own agent preset (`daily`) is
- *         composed of a chat persona, the web tools, the question tool and
- *         compaction — no files, no shell, no plan mode, no subagents. The loop
- *         is 用户消息 → 模型 → 工具调用 → 回复.
+ *         composed of a chat persona, the web tools, local file read/write
+ *         (read/write/edit/glob/grep), the question tool and compaction — no
+ *         shell, no plan mode, no subagents. The loop is
+ *         用户消息 → 模型 → 工具调用 → 回复.
  *   工作  exactly the shipped behaviour, untouched.
  *
  * Five contributions hold that up:

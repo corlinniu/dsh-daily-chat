@@ -1,8 +1,8 @@
 {
   "name": "@local/dsh-daily-chat",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "private": true,
-  "description": "Split New Session into 日常 (a lightweight chat agent) and 工作 (the shipped coding agent), with a daily-chat session list in the sidebar.",
+  "description": "Split New Session into 日常 (a lightweight chat agent with web, questions and local file read/write) and 工作 (the shipped coding agent), with a daily-chat session list in the sidebar.",
   "type": "module",
   "exports": {
     ".": "./index.js",
