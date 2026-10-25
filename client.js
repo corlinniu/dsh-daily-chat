@@ -30,6 +30,11 @@
  *    read like the rows they replace. The hide rule is matched on that label —
  *    the only DOM handle a row has — and is published only while the menu can
  *    carry the rows, so a shell without that seat keeps every row where it was.
+ *    That menu then opens DOWNWARD, as a continuation of the list instead of a
+ *    second-level popup: see {@link mountMoreInline}, a paint-time pass over the
+ *    surface the shell owns — geometry, chrome and the list's reserved height
+ *    only, never the surface itself, so clicks, state and close all stay the
+ *    shell's.
  * 2. Two `main` panels under those ids, one per row. Both are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
  *    centre column straight back to the conversation. That is what makes the
@@ -101,6 +106,26 @@ window.__ModuleLoader__.load({
     const MOVED_PANEL_IDS = ['plugins', 'schedules'];
     /** Where the two moved rows sit in the 「更多」 menu, above its own actions. */
     const MOVED_MENU_ORDER = -10;
+    /**
+     * The marker the inline 「更多」 pass puts on the shell's menu surface while
+     * it is painting it as a continuation of the panel list, and the marker on
+     * the macOS backing painted under that surface.
+     */
+    const MORE_INLINE_ATTR = 'data-dsc-more-inline';
+    const MORE_BACKING_ATTR = 'data-dsc-more-backing';
+    /** The three custom properties carrying the inline surface's viewport box. */
+    const MORE_X_PROPERTY = '--dsc-more-x';
+    const MORE_Y_PROPERTY = '--dsc-more-y';
+    const MORE_WIDTH_PROPERTY = '--dsc-more-width';
+    /**
+     * Panel-list width below which 「更多」 keeps its native popup: the collapsed
+     * sidebar is an icon rail and has no width to expand into.
+     */
+    const MORE_INLINE_MIN_WIDTH = 120;
+    /** The attribute a menu surface carries all by itself (see the primitives `Menu`). */
+    const MENU_SURFACE_ATTR = 'data-menu-material';
+    /** The attribute the macOS backing of that surface carries. */
+    const MENU_BACKING_ATTR = 'data-menu-backing';
     /** The class the elapsed line and its two parts carry. */
     const TURN_CLASS = 'dsc-took';
     /** The line as the turnTail seat paints it: under the action row, on its own. */
@@ -358,12 +383,31 @@ window.__ModuleLoader__.load({
      * above are deliberately left alone by this: DSH reuses a blank Session when
      * the same entry point is clicked again, and that reuse reads the very ids a
      * projection would have to hide.
+     *
+     * The tail rules restyle DSH's 「更多」 menu surface while
+     * {@link mountMoreInline} is painting it as a continuation of the panel
+     * list. The shell's menu stays exactly the shell's — same node, same rows,
+     * same open/close state — so nothing here hides or moves anything; the
+     * surface is simply re-aimed with the geometry the pass publishes and
+     * stripped of the card chrome that would read as a second level (translucent
+     * material, elevation, rounded corners, and the macOS backing painted under
+     * it). The rows take the panel list's own metrics — 36px tall with the
+     * list's 2px gaps, 14px/22px type, a 16px glyph, the same 8px gutters — so
+     * the expansion reads as the list continued rather than as a menu that
+     * happens to sit below it.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
       `html[${MODE_ATTRIBUTE}="daily"] [class*="heroWorkspaceRow"]{display:none !important}`,
       `html[${MODE_ATTRIBUTE}="daily"] [data-slot="conversation.session.header.actions"] > span[title] > svg{display:none !important}`,
       '[data-row-key^="session:"]:not(:has(> [class*="_time"])):not(:has(> [class*="_rowActions"])){display:none !important}',
+      `[${MORE_INLINE_ATTR}]{left:var(${MORE_X_PROPERTY},0px) !important;top:var(${MORE_Y_PROPERTY},0px) !important;width:var(${MORE_WIDTH_PROPERTY},200px) !important;min-width:0 !important;max-width:none !important;max-height:none !important;margin:0 !important;padding:0 !important;border:0 !important;border-radius:0 !important;background:transparent !important;box-shadow:none !important;visibility:visible !important}`,
+      `[${MORE_INLINE_ATTR}] > [class*="material"]{display:none !important}`,
+      `[${MORE_INLINE_ATTR}] > [class*="viewport"]{gap:2px}`,
+      `[${MORE_BACKING_ATTR}]{display:none !important}`,
+      `[${MORE_INLINE_ATTR}] button[role="menuitem"]{min-height:36px;padding:7px 8px;gap:8px;font-size:14px;line-height:22px;border-radius:var(--dsw-radius-md)}`,
+      `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"]{width:16px;height:16px;color:inherit}`,
+      `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"] svg{width:16px;height:16px}`,
     ].join('');
 
     /**
@@ -1555,6 +1599,184 @@ window.__ModuleLoader__.load({
           return rules.length === 0 ? null : h('style', null, rules.join(''));
         }
 
+        /* ── 「更多」 as an inline expansion ───────────────────────────────────── */
+
+        /**
+         * Expand DSH's 「更多」 menu downward inside the panel list instead of
+         * letting it pop up as a second-level menu.
+         *
+         * The list paints that menu through the shared `Menu` primitive, which
+         * portals its surface to `<body>` and pins it to the anchor row; a
+         * plugin gets no seat inside it. Moving the portaled node into the
+         * sidebar would be the direct way and is a trap: React deletes a portal
+         * child with `container.removeChild(node)`, so a reparented surface
+         * makes the next close throw. This pass therefore leaves the node
+         * exactly where React owns it and only changes how it is painted:
+         *
+         *   - geometry: the surface is fixed under the 「更多」 row, at the panel
+         *     list's own left edge and width, re-read every frame (the shell
+         *     already runs a position loop for the same menu);
+         *   - space: the list reserves the surface's height in its bottom
+         *     padding, so the workspace list moves down exactly as it would if
+         *     the rows were painted in the list — and moves back when the menu
+         *     closes and React removes the surface;
+         *   - chrome: {@link CHROME_CSS} drops the translucent card, its
+         *     elevation, its rounded corners and the macOS backing under it, and
+         *     gives the rows the panel list's own metrics, so what remains reads
+         *     as the same list continued.
+         *
+         * Adoption is deliberately narrow: a menu surface appearing in `<body>`
+         * while the panel list's own `[aria-haspopup]` row is expanded and the
+         * list is wide enough to expand into. The collapsed sidebar is an icon
+         * rail and keeps the native popup; a build whose markup stops matching
+         * (no `data-menu-material`, a renamed list class, no
+         * `requestAnimationFrame`) simply leaves the popup alone — the same
+         * behaviour as before this pass existed.
+         *
+         * @returns the disposer that gives the surface and the list's space back.
+         */
+        function mountMoreInline() {
+          if (
+            typeof document === 'undefined'
+            || typeof MutationObserver !== 'function'
+            || typeof requestAnimationFrame !== 'function'
+          ) {
+            return () => {};
+          }
+
+          /** The surface being expanded, while the menu is open. */
+          let surface = null;
+          /** The macOS backing painted under that surface, while it is open. */
+          let backing = null;
+          /** The list whose bottom padding holds the reserved height. */
+          let spacedList = null;
+          /** Handle of the geometry loop, or 0 while it is not running. */
+          let frame = 0;
+
+          /** The sidebar's panel list, or null before the shell paints it. */
+          function panelList() {
+            return document.querySelector('nav[class*="panelList"]');
+          }
+
+          /** The open menu's row, while the list is wide enough to expand into. */
+          function openRow(list) {
+            if (list === null || list.getBoundingClientRect().width < MORE_INLINE_MIN_WIDTH) return null;
+            return list.querySelector('button[aria-haspopup="menu"][aria-expanded="true"]');
+          }
+
+          /** Drop the reserved height and every mark of the current pass. */
+          function forget() {
+            if (frame !== 0) {
+              cancelAnimationFrame(frame);
+              frame = 0;
+            }
+            if (backing !== null) {
+              backing.removeAttribute(MORE_BACKING_ATTR);
+              backing = null;
+            }
+            if (surface !== null) {
+              surface.removeAttribute(MORE_INLINE_ATTR);
+              surface.style.removeProperty(MORE_X_PROPERTY);
+              surface.style.removeProperty(MORE_Y_PROPERTY);
+              surface.style.removeProperty(MORE_WIDTH_PROPERTY);
+              surface = null;
+            }
+            if (spacedList !== null) {
+              spacedList.style.paddingBottom = '';
+              spacedList = null;
+            }
+          }
+
+          /** Re-aim the surface, then keep the list's reserved height in step. */
+          function measure() {
+            frame = 0;
+            const list = panelList();
+            if (surface === null || !surface.isConnected || list === null || !list.isConnected) {
+              forget();
+              return;
+            }
+            const row = openRow(list);
+            // The menu is open for as long as its surface is mounted; a frame
+            // where the row is momentarily unreadable is waited out rather than
+            // taken as a close.
+            if (row === null) {
+              frame = requestAnimationFrame(measure);
+              return;
+            }
+            const listRect = list.getBoundingClientRect();
+            const rowRect = row.getBoundingClientRect();
+            surface.style.setProperty(MORE_X_PROPERTY, `${listRect.left + 2}px`);
+            surface.style.setProperty(MORE_Y_PROPERTY, `${rowRect.bottom + 2}px`);
+            surface.style.setProperty(MORE_WIDTH_PROPERTY, `${Math.max(0, listRect.width - 4)}px`);
+            const height = surface.getBoundingClientRect().height;
+            if (height > 0) {
+              // A repainted list is a new node even at the same height, and a
+              // reservation wiped by someone else has to come back; comparing
+              // the inline value every frame covers both.
+              if (spacedList !== null && spacedList !== list) spacedList.style.paddingBottom = '';
+              const reserved = `${height}px`;
+              if (list.style.paddingBottom !== reserved) list.style.paddingBottom = reserved;
+              spacedList = list;
+            }
+            frame = requestAnimationFrame(measure);
+          }
+
+          /** Take a freshly opened menu surface into the pass, when it is ours. */
+          function adopt(candidate) {
+            if (surface !== null && surface.isConnected) return;
+            forget();
+            const list = panelList();
+            if (list === null || openRow(list) === null) return;
+            // An empty menu would reserve gap without showing anything.
+            if (candidate.querySelector('button[role="menuitem"]') === null) return;
+            surface = candidate;
+            surface.setAttribute(MORE_INLINE_ATTR, '');
+            // macOS paints an opaque backing under the translucent surface,
+            // anchored to it by the anchor-name both nodes carry. In flow there
+            // is nothing behind the rows to back, so the pair's backing goes too.
+            const anchor = surface.style.getPropertyValue('--dsh-menu-anchor');
+            if (anchor !== '') {
+              for (const candidateBacking of document.querySelectorAll(`[${MENU_BACKING_ATTR}]`)) {
+                if (candidateBacking.style.getPropertyValue('--dsh-menu-anchor') !== anchor) continue;
+                candidateBacking.setAttribute(MORE_BACKING_ATTR, '');
+                backing = candidateBacking;
+              }
+            }
+            measure();
+          }
+
+          const observer = new MutationObserver((records) => {
+            for (const record of records) {
+              for (const node of record.addedNodes) {
+                if (!(node instanceof Element)) continue;
+                const candidate = node.hasAttribute(MENU_SURFACE_ATTR)
+                  ? node
+                  : node.querySelector(`[${MENU_SURFACE_ATTR}]`);
+                if (candidate !== null) adopt(candidate);
+              }
+              for (const node of record.removedNodes) {
+                if (node === surface || node === backing) forget();
+              }
+            }
+          });
+          observer.observe(document.body, { childList: true });
+
+          return () => {
+            observer.disconnect();
+            forget();
+          };
+        }
+
+        /**
+         * Mounts {@link mountMoreInline} for as long as the plugin is loaded: the
+         * pass corrects the shell's menu in the DOM and paints nothing of its
+         * own, so the overlay occupant is null.
+         */
+        function MoreInline() {
+          React.useEffect(() => mountMoreInline(), []);
+          return null;
+        }
+
         /**
          * Carries the chrome adjustments, mounted unconditionally on the
          * frame-wide overlay layer so they apply in every mode. Rendering a
@@ -1735,6 +1957,15 @@ window.__ModuleLoader__.load({
           id: 'daily-chat-moved-panels',
           order: 2,
         }, MovedPanelsStyle));
+
+        // The pass that turns the shell's 「更多」 popup into a downward expansion
+        // of the list. It owns no DOM of its own — it rides the menu surface the
+        // shell paints — but it must be mounted for as long as the plugin is.
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'daily-chat-more-inline',
+          order: 3,
+        }, MoreInline));
 
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
