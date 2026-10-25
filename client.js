@@ -31,10 +31,11 @@
  *    the only DOM handle a row has — and is published only while the menu can
  *    carry the rows, so a shell without that seat keeps every row where it was.
  *    That menu then opens DOWNWARD, as a continuation of the list instead of a
- *    second-level popup: see {@link mountMoreInline}, a paint-time pass over the
- *    surface the shell owns — geometry, chrome and the list's reserved height
- *    only, never the surface itself, so clicks, state and close all stay the
- *    shell's.
+ *    second-level popup, and its trigger row reads 「收起」 while it is open: see
+ *    {@link mountMoreInline}, a paint-time pass over the surface the shell
+ *    owns — geometry, chrome, the trigger's label and the list's reserved
+ *    height only, never the surface itself, so clicks, state and close all stay
+ *    the shell's.
  * 2. Two `main` panels under those ids, one per row. Both are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
  *    centre column straight back to the conversation. That is what makes the
@@ -113,6 +114,13 @@ window.__ModuleLoader__.load({
      */
     const MORE_INLINE_ATTR = 'data-dsc-more-inline';
     const MORE_BACKING_ATTR = 'data-dsc-more-backing';
+    /**
+     * The marker (and the text it carries) that turns the 「更多」 row's label into
+     * 「收起」 while the expansion is open. It sits on the label span itself, so
+     * the `::after` rule can read the text back with `attr()` — and it goes away
+     * the moment the shell closes the menu, leaving the row's own label alone.
+     */
+    const MORE_OPEN_ATTR = 'data-dsc-more-open';
     /** The three custom properties carrying the inline surface's viewport box. */
     const MORE_X_PROPERTY = '--dsc-more-x';
     const MORE_Y_PROPERTY = '--dsc-more-y';
@@ -160,6 +168,7 @@ window.__ModuleLoader__.load({
       dismiss: '知道了',
       dailyChats: '日常聊天',
       startWork: '开始工作',
+      moreCollapse: '收起',
       newChat: '新建日常聊天',
       lockedProject: '日常聊天固定在自己的工作区，不能切换项目。要开始工作，请点侧边栏的「开始工作」。',
       starting: '正在打开日常聊天…',
@@ -185,6 +194,7 @@ window.__ModuleLoader__.load({
       dismiss: 'Dismiss',
       dailyChats: 'Chats',
       startWork: 'Start working',
+      moreCollapse: 'Collapse',
       newChat: 'New chat',
       lockedProject: 'A chat stays in its own workspace — use “Start working” in the sidebar to open a project.',
       starting: 'Opening chat…',
@@ -394,7 +404,10 @@ window.__ModuleLoader__.load({
      * it). The rows take the panel list's own metrics — 36px tall with the
      * list's 2px gaps, 14px/22px type, a 16px glyph, the same 8px gutters — so
      * the expansion reads as the list continued rather than as a menu that
-     * happens to sit below it.
+     * happens to sit below it. Two more rules turn the trigger's own label into
+     * 「收起」 while it is open: the text arrives through `MORE_OPEN_ATTR` on the
+     * title span, and `font-size:0` + `::after{content:attr(...)}` paints it in
+     * place of the shell's own 「更多」 without touching that text node.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
@@ -405,6 +418,8 @@ window.__ModuleLoader__.load({
       `[${MORE_INLINE_ATTR}] > [class*="material"]{display:none !important}`,
       `[${MORE_INLINE_ATTR}] > [class*="viewport"]{gap:2px}`,
       `[${MORE_BACKING_ATTR}]{display:none !important}`,
+      `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]{font-size:0 !important}`,
+      `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]::after{content:attr(${MORE_OPEN_ATTR});font-size:14px;line-height:22px;white-space:nowrap}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"]{min-height:36px;padding:7px 8px;gap:8px;font-size:14px;line-height:22px;border-radius:var(--dsw-radius-md)}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"]{width:16px;height:16px;color:inherit}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"] svg{width:16px;height:16px}`,
@@ -1633,9 +1648,14 @@ window.__ModuleLoader__.load({
          * `requestAnimationFrame`) simply leaves the popup alone — the same
          * behaviour as before this pass existed.
          *
+         * The trigger row's own label is swapped too: while the expansion is
+         * open its title reads 「收起」 (`MORE_OPEN_ATTR`, text supplied by the
+         * locale seat), so the same row says what clicking it will do.
+         *
+         * @param collapseLabel - supplies the trigger's open-state title.
          * @returns the disposer that gives the surface and the list's space back.
          */
-        function mountMoreInline() {
+        function mountMoreInline(collapseLabel) {
           if (
             typeof document === 'undefined'
             || typeof MutationObserver !== 'function'
@@ -1646,8 +1666,6 @@ window.__ModuleLoader__.load({
 
           /** The surface being expanded, while the menu is open. */
           let surface = null;
-          /** The macOS backing painted under that surface, while it is open. */
-          let backing = null;
           /** The list whose bottom padding holds the reserved height. */
           let spacedList = null;
           /** Handle of the geometry loop, or 0 while it is not running. */
@@ -1670,9 +1688,11 @@ window.__ModuleLoader__.load({
               cancelAnimationFrame(frame);
               frame = 0;
             }
-            if (backing !== null) {
-              backing.removeAttribute(MORE_BACKING_ATTR);
-              backing = null;
+            for (const marked of document.querySelectorAll(`[${MORE_BACKING_ATTR}]`)) {
+              marked.removeAttribute(MORE_BACKING_ATTR);
+            }
+            for (const titled of document.querySelectorAll(`nav[class*="panelList"] [${MORE_OPEN_ATTR}]`)) {
+              titled.removeAttribute(MORE_OPEN_ATTR);
             }
             if (surface !== null) {
               surface.removeAttribute(MORE_INLINE_ATTR);
@@ -1684,6 +1704,25 @@ window.__ModuleLoader__.load({
             if (spacedList !== null) {
               spacedList.style.paddingBottom = '';
               spacedList = null;
+            }
+          }
+
+          /**
+           * Hide the macOS backing painted under the translucent menu.
+           *
+           * The backing is its own portal node, and React re-appends it from a
+           * layout effect right after opening — a remove+add of the SAME node.
+           * That is why nothing here pins a reference: reading that removal as
+           * "the menu closed" tears the whole pass down, which is exactly what
+           * the first revision of this code did. Re-marking from the geometry
+           * loop survives the move too, since attributes travel with the node.
+           */
+          function hideBacking() {
+            const anchor = surface.style.getPropertyValue('--dsh-menu-anchor');
+            if (anchor === '') return;
+            for (const candidate of document.querySelectorAll(`[${MENU_BACKING_ATTR}]`)) {
+              if (candidate.style.getPropertyValue('--dsh-menu-anchor') !== anchor) continue;
+              if (!candidate.hasAttribute(MORE_BACKING_ATTR)) candidate.setAttribute(MORE_BACKING_ATTR, '');
             }
           }
 
@@ -1702,6 +1741,13 @@ window.__ModuleLoader__.load({
             if (row === null) {
               frame = requestAnimationFrame(measure);
               return;
+            }
+            hideBacking();
+            // The row's title span is the open-state label's carrier; the rail
+            // paints no title at all, and that state keeps the native popup.
+            const title = row.querySelector('span[class*="panelTitle"]');
+            if (title !== null && !title.hasAttribute(MORE_OPEN_ATTR)) {
+              title.setAttribute(MORE_OPEN_ATTR, collapseLabel());
             }
             const listRect = list.getBoundingClientRect();
             const rowRect = row.getBoundingClientRect();
@@ -1731,17 +1777,6 @@ window.__ModuleLoader__.load({
             if (candidate.querySelector('button[role="menuitem"]') === null) return;
             surface = candidate;
             surface.setAttribute(MORE_INLINE_ATTR, '');
-            // macOS paints an opaque backing under the translucent surface,
-            // anchored to it by the anchor-name both nodes carry. In flow there
-            // is nothing behind the rows to back, so the pair's backing goes too.
-            const anchor = surface.style.getPropertyValue('--dsh-menu-anchor');
-            if (anchor !== '') {
-              for (const candidateBacking of document.querySelectorAll(`[${MENU_BACKING_ATTR}]`)) {
-                if (candidateBacking.style.getPropertyValue('--dsh-menu-anchor') !== anchor) continue;
-                candidateBacking.setAttribute(MORE_BACKING_ATTR, '');
-                backing = candidateBacking;
-              }
-            }
             measure();
           }
 
@@ -1755,7 +1790,10 @@ window.__ModuleLoader__.load({
                 if (candidate !== null) adopt(candidate);
               }
               for (const node of record.removedNodes) {
-                if (node === surface || node === backing) forget();
+                // Only the surface itself closes the expansion. The backing has
+                // its own remove+add cycle while the menu stays open (see
+                // {@link hideBacking}), so it must not be read as a close.
+                if (node === surface) forget();
               }
             }
           });
@@ -1772,8 +1810,9 @@ window.__ModuleLoader__.load({
          * pass corrects the shell's menu in the DOM and paints nothing of its
          * own, so the overlay occupant is null.
          */
-        function MoreInline() {
-          React.useEffect(() => mountMoreInline(), []);
+        function MoreInline(props) {
+          const collapseLabel = typeof props.t === 'function' ? props.t('moreCollapse') : '收起';
+          React.useEffect(() => mountMoreInline(() => collapseLabel), [collapseLabel]);
           return null;
         }
 
@@ -1965,6 +2004,7 @@ window.__ModuleLoader__.load({
           name: 'shell.overlay',
           id: 'daily-chat-more-inline',
           order: 3,
+          locale: LOCALE_NS,
         }, MoreInline));
 
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
