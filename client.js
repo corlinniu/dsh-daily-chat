@@ -37,10 +37,11 @@
  *    height only, never the surface itself, so clicks, state and close all stay
  *    the shell's.
  *
- *    A second, smaller paint pass ({@link mountViewActions}) removes the same
- *    plugin's two plugin-discovery rows from the conversation view tab row's
- *    「更多」 menu — a different seat with the same complaint — and retires that
- *    launcher while it would open empty.
+ *    A second, smaller pair of passes removes the same plugin's two
+ *    plugin-discovery rows from the conversation view tab row's 「更多」 menu —
+ *    a different seat with the same complaint — and hides that launcher up
+ *    front whenever no view tab is folded behind it (`mountViewActions` for the
+ *    rows, `ViewMoreWatch` for the launcher).
  * 2. Two `main` panels under those ids, one per row. Both are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
  *    centre column straight back to the conversation. That is what makes the
@@ -1862,12 +1863,12 @@ window.__ModuleLoader__.load({
          * listClassName the conversation shell passes to the shared menu), which
          * is why the sidebar's own 「更多」 is never touched.
          *
-         * If nothing but those two rows was in the menu (no folded view tab),
-         * the launcher has nothing left to open: the surface is marked hidden
-         * and the launcher toggled closed within the same mutation turn — before
-         * a paint — and the launcher stays hidden until the tab strip changes
-         * (a view added, removed or folded by a resize), at which point it comes
-         * back so a folded view is still reachable.
+         * The launcher's own visibility is decided up front by
+         * {@link ViewMoreWatch}; this pass only needs a fallback for the case
+         * that estimate misses (a view the shell hides for its own reasons): if
+         * the menu turns out to hold nothing but those two rows, the surface is
+         * marked hidden and the launcher toggled closed within the same mutation
+         * turn — before a paint — and stays hidden until the tab strip moves.
          *
          * @returns the disposer that gives the menu and its launcher back.
          */
@@ -1969,6 +1970,73 @@ window.__ModuleLoader__.load({
          */
         function ViewActions() {
           React.useEffect(() => mountViewActions(), []);
+          return null;
+        }
+
+        /**
+         * Hide the conversation view row's 「更多」 launcher when no view tab is
+         * folded behind it — without waiting for a click.
+         *
+         * The launcher exists because `entry-customization` registers rows into
+         * the view actions seat, and {@link mountViewActions} removes those rows;
+         * with nothing folded, the menu would open empty. The shell already
+         * decides what is folded with one line — it shows
+         * `floor((rowWidth - 48) / 120)` tabs and pushes the rest into this menu
+         * — so the same arithmetic over the registered `conversation.view`
+         * entries answers the question up front. A view that *is* folded keeps
+         * the launcher, so it stays reachable.
+         *
+         * Called from the session header's actions seat, so it mounts with the
+         * header; re-syncs on every header render (the blank→conversation flip
+         * is what paints the tab row), on a resize of the row (the tab limit is
+         * width-derived) and when the `conversation.view` ledger changes.
+         */
+        function syncViewMoreVisibility() {
+          const tabs = document.querySelector(`[${CONVERSATION_TABS_ATTR}]`);
+          const row = tabs === null ? null : tabs.parentElement;
+          if (row === null) return;
+          const anchors = row.querySelectorAll(`[class*="${VIEW_MORE_ANCHOR_CLASS}"]`);
+          if (anchors.length === 0) return;
+          let views = 0;
+          try {
+            views = ctx.slots.entries('conversation.view').length;
+          } catch (reason) {
+            console.warn('[daily-chat] reading the conversation views failed:', reason);
+            return;
+          }
+          const visibleLimit = Math.max(1, Math.floor((row.clientWidth - 48) / 120));
+          const folded = views > visibleLimit;
+          for (const anchor of anchors) {
+            if (folded) anchor.removeAttribute(VIEW_MORE_EMPTY_ATTR);
+            else anchor.setAttribute(VIEW_MORE_EMPTY_ATTR, '');
+          }
+        }
+
+        /**
+         * The bridge that runs {@link syncViewMoreVisibility} while a session
+         * header is mounted: the header, not the plugin, owns when the tab row
+         * exists, so the plugin hangs this off a seat in the header that paints
+         * nothing.
+         */
+        function ViewMoreWatch() {
+          React.useEffect(() => {
+            syncViewMoreVisibility();
+            const tabs = document.querySelector(`[${CONVERSATION_TABS_ATTR}]`);
+            const row = tabs === null ? null : tabs.parentElement;
+            const resize = typeof ResizeObserver === 'function' && row !== null
+              ? new ResizeObserver(() => syncViewMoreVisibility())
+              : null;
+            if (resize !== null) resize.observe(row);
+            const stop = ctx.slots.subscribe('conversation.view', () => syncViewMoreVisibility());
+            return () => {
+              if (resize !== null) resize.disconnect();
+              stop();
+            };
+          }, []);
+          // Every header render (blank → conversation included) re-evaluates.
+          React.useEffect(() => {
+            syncViewMoreVisibility();
+          });
           return null;
         }
 
@@ -2171,6 +2239,15 @@ window.__ModuleLoader__.load({
           id: 'daily-chat-view-actions',
           order: 4,
         }, ViewActions));
+
+        // And the launcher itself: while a session header is mounted, decide up
+        // front whether anything is folded behind the 「更多」, and hide it when
+        // nothing is. Hangs off the header's actions seat purely to know when a
+        // tab row exists; it paints nothing.
+        ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+          name: 'conversation.session.header.actions',
+          id: 'daily-chat-view-more',
+        }, ViewMoreWatch));
 
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
