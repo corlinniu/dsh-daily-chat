@@ -19,10 +19,17 @@
  *    may appear. The one that renders a full-width icon + label row is
  *    `sidebar.panellist`, so 「日常聊天」 and 「开始工作」 live there, ordered
  *    above 「插件」 by a negative `order` (the shell sorts by it ascending, and
- *    panels default to 0). The rest of that panel list — DSH's own 「更多」 menu
- *    included — is left exactly as the shell paints it; this plugin owns no part
- *    of it. A panellist row's click is the shell's and is fixed to
- *    `selectPanel(id)`, which is why contribution 2 exists.
+ *    panels default to 0). A panellist row's click is the shell's and is fixed
+ *    to `selectPanel(id)`, which is why contribution 2 exists.
+ *
+ *    The rest of that list is the shell's, with one arrangement: the two system
+ *    rows 「插件」 and 「自动化任务」 are moved into DSH's own 「更多」 menu. Both
+ *    panels stay; only their rows leave the list, and their menu rows are
+ *    contributed through the menu's additive seat (`sidebar.panellist.actions`)
+ *    with label and glyph read back from the shell's ledger, so they look and
+ *    read like the rows they replace. The hide rule is matched on that label —
+ *    the only DOM handle a row has — and is published only while the menu can
+ *    carry the rows, so a shell without that seat keeps every row where it was.
  * 2. Two `main` panels under those ids, one per row. Both are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
  *    centre column straight back to the conversation. That is what makes the
@@ -84,6 +91,16 @@ window.__ModuleLoader__.load({
     const DAILY_PANEL = 'daily-chat';
     /** The `main` panel the 「开始工作」 sidebar row transiently opens. */
     const WORK_PANEL = 'daily-chat-work';
+    /**
+     * The shell's own panel launchers that this plugin moves into DSH's native
+     * 「更多」 menu: the plugin manager page and the automation-task page. Both
+     * keep their panels — only their rows leave the panel list, and both rows
+     * come back when that menu is unavailable (an older DSH, a primitives build
+     * without `MenuItemButton`).
+     */
+    const MOVED_PANEL_IDS = ['plugins', 'schedules'];
+    /** Where the two moved rows sit in the 「更多」 menu, above its own actions. */
+    const MOVED_MENU_ORDER = -10;
     /** The class the elapsed line and its two parts carry. */
     const TURN_CLASS = 'dsc-took';
     /** The line as the turnTail seat paints it: under the action row, on its own. */
@@ -478,7 +495,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    let state = { mode: readMode(), busy: false, error: null };
+    let state = { mode: readMode(), busy: false, error: null, moreMenuReady: false };
     const listeners = new Set();
 
     /**
@@ -566,6 +583,16 @@ window.__ModuleLoader__.load({
      */
     const AddGlyph = typeof primitives.IconProjectAddOutline16 === 'function'
       ? primitives.IconProjectAddOutline16
+      : null;
+
+    /**
+     * The menu row the shell's own 「更多」 uses. Borrowed from the shared
+     * primitives module so the two moved rows join that menu's styling and
+     * keyboard walk; a primitives build without it leaves both the rows and
+     * the panel list exactly as the shell painted them.
+     */
+    const MenuItemButton = typeof primitives.MenuItemButton === 'function'
+      ? primitives.MenuItemButton
       : null;
 
     /**
@@ -1421,6 +1448,113 @@ window.__ModuleLoader__.load({
           startWorkSession();
         });
 
+        /* ── the shell's own rows, folded into its 「更多」 menu ───────────────── */
+
+        /**
+         * One ledger read of the sidebar's panel rows. The raw entry list is
+         * stable between mutations, which is what makes it a legal
+         * `useSyncExternalStore` snapshot; the label thunks on it follow the
+         * active locale.
+         */
+        const readPanelEntries = () => ctx.slots.entries('sidebar.panellist');
+        /** Panel-ledger notifications (the shell repaints rows off the same slot). */
+        const subscribePanelEntries = (listener) => ctx.slots.subscribe('sidebar.panellist', listener);
+
+        /** The panel-list ledger as React sees it: rows this plugin does not own. */
+        function usePanelEntries() {
+          return React.useSyncExternalStore(subscribePanelEntries, readPanelEntries, readPanelEntries);
+        }
+
+        /**
+         * Resolve one ledger row's label. `options.label` is either text or a
+         * thunk that follows the active locale; the shell projects rows through
+         * the same thunk, so the moved menu rows speak exactly what the rows
+         * they replace said.
+         * @param entry - one `sidebar.panellist` ledger entry, when present.
+         * @returns the row's display text, or undefined when it has none.
+         */
+        function entryLabel(entry) {
+          if (entry === undefined) return undefined;
+          const label = entry.options.label;
+          const text = typeof label === 'function' ? label() : label;
+          return typeof text === 'string' && text !== '' ? text : undefined;
+        }
+
+        /** The ledger entry behind one moved row, or undefined while it is absent. */
+        function movedEntry(entries, id) {
+          return entries.find((entry) => entry.options.id === id);
+        }
+
+        /**
+         * Resolve one ledger row's glyph. A `sidebar.panellist` entry's component
+         * IS the icon the shell paints beside the row's label, so the moved menu
+         * rows borrow it rather than inventing one — 「插件」 keeps its pinwheel and
+         * 「自动化任务」 its clock, in the same 16px cell as the menu's own icons.
+         * @param entry - one ledger entry, when present.
+         * @returns the leading icon for a menu row, or undefined when it has none.
+         */
+        function entryGlyph(entry) {
+          if (entry === undefined || typeof entry.component !== 'function') return undefined;
+          return h(entry.component, { size: 16 });
+        }
+
+        /**
+         * The two menu rows that stand in for the moved panel rows: 「插件」 and
+         * 「自动化任务」. Label and glyph both come from the shell's ledger, so the
+         * rows look like the rows they replace. They call the owner's own
+         * `onOpen` — the entry point the shell's menu rows use, which selects the
+         * panel and reports the click — after dismissing the menu, exactly like
+         * the rows around them.
+         * @param props - owner seats (`onOpen`, `onDismiss`) supplied by the menu.
+         * @returns two menu rows, or null while neither panel is registered.
+         */
+        function MovedPanelsMenu(props) {
+          const entries = usePanelEntries();
+          if (MenuItemButton === null) return null;
+          const rows = [];
+          for (const id of MOVED_PANEL_IDS) {
+            const entry = movedEntry(entries, id);
+            const label = entryLabel(entry);
+            if (label === undefined) continue;
+            rows.push(h(MenuItemButton, {
+              key: id,
+              icon: entryGlyph(entry),
+              onSelect: () => {
+                props.onDismiss();
+                props.onOpen(id);
+              },
+            }, label));
+          }
+          return rows.length === 0 ? null : h(React.Fragment, null, rows);
+        }
+
+        /**
+         * Hide the two moved rows from the panel list.
+         *
+         * A row's only DOM handles are its hashed class, its localized
+         * `aria-label` and `aria-current` — no id, no `data-*` — so the rule is
+         * matched on the label the ledger reports: the same text the row paints,
+         * whatever locale is active. It is published only while the 「更多」 menu
+         * can actually carry the two rows; with no menu to move them into (an
+         * older DSH without the actions seat, a primitives build without
+         * `MenuItemButton`) every row stays visible instead of disappearing off
+         * the sidebar.
+         * @returns the label-matched rules, or null while hiding is not safe.
+         */
+        function MovedPanelsStyle() {
+          const ready = useChatState().moreMenuReady;
+          const entries = usePanelEntries();
+          if (!ready || MenuItemButton === null) return null;
+          const rules = [];
+          for (const id of MOVED_PANEL_IDS) {
+            const label = entryLabel(movedEntry(entries, id));
+            if (label === undefined) continue;
+            const quoted = JSON.stringify(label);
+            rules.push(`nav[class*="panelList"] button[aria-label=${quoted}]{display:none !important}`);
+          }
+          return rules.length === 0 ? null : h('style', null, rules.join(''));
+        }
+
         /**
          * Carries the chrome adjustments, mounted unconditionally on the
          * frame-wide overlay layer so they apply in every mode. Rendering a
@@ -1571,11 +1705,36 @@ window.__ModuleLoader__.load({
           locale: LOCALE_NS,
         }, WorkStarter));
 
+        // The shell's 「更多」 menu takes over two of its own panel rows. This
+        // registration is also the gate for {@link MovedPanelsStyle}: while the
+        // menu content is live the rows are hidden, and when the seat is missing
+        // the rows stay exactly where the shell put them. `moreMenuReady` is
+        // published through the store because the style seat mounts separately
+        // and has to repaint when this one lands.
+        ctx.slots.inject('sidebar.panellist.actions', () => {
+          const dispose = ctx.slots.register({
+            name: 'sidebar.panellist.actions',
+            id: 'daily-chat-moved-panels',
+            order: MOVED_MENU_ORDER,
+          }, MovedPanelsMenu);
+          setState({ moreMenuReady: true });
+          return () => {
+            dispose();
+            setState({ moreMenuReady: false });
+          };
+        });
+
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'daily-chat-chrome',
           order: 1,
         }, ChromeStyle));
+
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'daily-chat-moved-panels',
+          order: 2,
+        }, MovedPanelsStyle));
 
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
