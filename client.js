@@ -406,8 +406,11 @@ window.__ModuleLoader__.load({
      * the expansion reads as the list continued rather than as a menu that
      * happens to sit below it. Two more rules turn the trigger's own label into
      * 「收起」 while it is open: the text arrives through `MORE_OPEN_ATTR` on the
-     * title span, and `font-size:0` + `::after{content:attr(...)}` paints it in
-     * place of the shell's own 「更多」 without touching that text node.
+     * title span, and `::after{content:attr(...)}` paints it in place of the
+     * shell's own 「更多」 without touching that text node. The span becomes a
+     * flex box so the substituted line is centered exactly like a normal row
+     * label: with the old `font-size:0` + inline pseudo, the pseudo's baseline
+     * hung off a zero-size strut and sat a pixel or two off the row's glyph.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
@@ -418,8 +421,8 @@ window.__ModuleLoader__.load({
       `[${MORE_INLINE_ATTR}] > [class*="material"]{display:none !important}`,
       `[${MORE_INLINE_ATTR}] > [class*="viewport"]{gap:2px}`,
       `[${MORE_BACKING_ATTR}]{display:none !important}`,
-      `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]{font-size:0 !important}`,
-      `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]::after{content:attr(${MORE_OPEN_ATTR});font-size:14px;line-height:22px;white-space:nowrap}`,
+      `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]{display:flex;align-items:center;font-size:0 !important}`,
+      `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]::after{content:attr(${MORE_OPEN_ATTR});font-size:14px;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"]{min-height:36px;padding:7px 8px;gap:8px;font-size:14px;line-height:22px;border-radius:var(--dsw-radius-md)}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"]{width:16px;height:16px;color:inherit}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"] svg{width:16px;height:16px}`,
