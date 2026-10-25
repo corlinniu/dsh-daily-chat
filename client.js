@@ -36,6 +36,11 @@
  *    owns — geometry, chrome, the trigger's label and the list's reserved
  *    height only, never the surface itself, so clicks, state and close all stay
  *    the shell's.
+ *
+ *    A second, smaller paint pass ({@link mountViewActions}) removes the same
+ *    plugin's two plugin-discovery rows from the conversation view tab row's
+ *    「更多」 menu — a different seat with the same complaint — and retires that
+ *    launcher while it would open empty.
  * 2. Two `main` panels under those ids, one per row. Both are transient: a row
  *    ACTS rather than navigates, so the panel performs the action and hands the
  *    centre column straight back to the conversation. That is what makes the
@@ -134,6 +139,23 @@ window.__ModuleLoader__.load({
     const MENU_SURFACE_ATTR = 'data-menu-material';
     /** The attribute the macOS backing of that surface carries. */
     const MENU_BACKING_ATTR = 'data-menu-backing';
+    /**
+     * Markers for the conversation view tab row's own 「更多」 menu: the two
+     * plugin-discovery rows this plugin removes from it, the empty-launcher
+     * state (nothing left to open), and the surface while it is being retired.
+     */
+    const VIEW_ACTION_ATTR = 'data-dsc-hide-entry-action';
+    const VIEW_MORE_EMPTY_ATTR = 'data-dsc-view-more-empty';
+    const VIEW_MORE_MENU_ATTR = 'data-dsc-view-more-menu';
+    /**
+     * Hashed class halves that identify that menu and its launcher. Only the
+     * suffix is stable across DSH builds; the hash in front changes with the
+     * stylesheet.
+     */
+    const VIEW_MORE_MENU_CLASS = 'viewsMoreMenu';
+    const VIEW_MORE_ANCHOR_CLASS = 'viewsMoreAnchor';
+    /** The attribute the conversation shell puts on its view tablist. */
+    const CONVERSATION_TABS_ATTR = 'data-conversation-tabs';
     /** The class the elapsed line and its two parts carry. */
     const TURN_CLASS = 'dsc-took';
     /** The line as the turnTail seat paints it: under the action row, on its own. */
@@ -426,6 +448,9 @@ window.__ModuleLoader__.load({
       `[${MORE_INLINE_ATTR}] button[role="menuitem"]{min-height:36px;padding:7px 8px;gap:8px;font-size:14px;line-height:22px;border-radius:var(--dsw-radius-md)}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"]{width:16px;height:16px;color:inherit}`,
       `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"] svg{width:16px;height:16px}`,
+      `[${VIEW_ACTION_ATTR}]{display:none !important}`,
+      `[${VIEW_MORE_EMPTY_ATTR}]{display:none !important}`,
+      `[${VIEW_MORE_MENU_ATTR}]{display:none !important}`,
     ].join('');
 
     /**
@@ -1819,6 +1844,134 @@ window.__ModuleLoader__.load({
           return null;
         }
 
+        /* ── the conversation view row's menu ─────────────────────────────────── */
+
+        /**
+         * Keep the conversation view tab row's 「更多」 menu free of the two
+         * plugin-discovery actions.
+         *
+         * That menu belongs to the conversation shell; the rows come from the
+         * shipped `entry-customization` plugin (`浏览更多插件` / `创建你的插件`),
+         * which has no seat-level switch a bundle can flip. They are recognised
+         * by the labels that plugin publishes in its own locale namespace —
+         * `ctx.locale.bind('entryCustomization')` resolves them in whatever
+         * language is active, and a namespace this build no longer carries makes
+         * `translate` fall back to the key itself, so nothing matches and the
+         * rows simply stay. The menu surface is recognised by the
+         * `viewsMoreMenu` class half it carries (`viewsMoreMenu` is the
+         * listClassName the conversation shell passes to the shared menu), which
+         * is why the sidebar's own 「更多」 is never touched.
+         *
+         * If nothing but those two rows was in the menu (no folded view tab),
+         * the launcher has nothing left to open: the surface is marked hidden
+         * and the launcher toggled closed within the same mutation turn — before
+         * a paint — and the launcher stays hidden until the tab strip changes
+         * (a view added, removed or folded by a resize), at which point it comes
+         * back so a folded view is still reachable.
+         *
+         * @returns the disposer that gives the menu and its launcher back.
+         */
+        function mountViewActions() {
+          if (
+            typeof document === 'undefined'
+            || typeof MutationObserver !== 'function'
+          ) {
+            return () => {};
+          }
+
+          const entryT = ctx.locale.bind('entryCustomization');
+          /** Disposer of the one-shot tab-strip watcher, while a launcher is hidden. */
+          let releaseTabs = null;
+
+          /** The two row labels to remove, in the active language. */
+          function hiddenLabels() {
+            return new Set([entryT('install'), entryT('create')]);
+          }
+
+          /** Stop watching the tab strip and show every hidden launcher again. */
+          function restoreLaunchers() {
+            if (releaseTabs !== null) releaseTabs();
+            for (const marked of document.querySelectorAll(`[${VIEW_MORE_EMPTY_ATTR}]`)) {
+              marked.removeAttribute(VIEW_MORE_EMPTY_ATTR);
+            }
+          }
+
+          /** Bring the launcher back on the next tab-strip change. */
+          function watchTabs(trigger) {
+            restoreLaunchers();
+            const anchor = trigger.closest(`[class*="${VIEW_MORE_ANCHOR_CLASS}"]`);
+            const row = anchor === null ? null : anchor.parentElement;
+            const tabs = row === null ? null : row.querySelector(`[${CONVERSATION_TABS_ATTR}]`);
+            if (tabs === null) return;
+            const watcher = new MutationObserver(() => {
+              restoreLaunchers();
+            });
+            const dispose = () => {
+              watcher.disconnect();
+              if (releaseTabs === dispose) releaseTabs = null;
+            };
+            watcher.observe(tabs, { childList: true });
+            releaseTabs = dispose;
+          }
+
+          /** Remove the two rows; retire the launcher when nothing else is left. */
+          function filter(surface) {
+            const labels = hiddenLabels();
+            let removed = 0;
+            for (const row of surface.querySelectorAll('button[role="menuitem"]')) {
+              const text = (row.textContent ?? '').trim();
+              if (!labels.has(text)) continue;
+              row.setAttribute(VIEW_ACTION_ATTR, '');
+              removed += 1;
+            }
+            if (removed === 0) return;
+            const left = surface.querySelectorAll(`button[role="menuitem"]:not([${VIEW_ACTION_ATTR}])`);
+            if (left.length > 0) return;
+            // Nothing but the plugin actions: close the empty surface before it
+            // can paint and keep the launcher out of the way until the tab strip
+            // moves again.
+            surface.setAttribute(VIEW_MORE_MENU_ATTR, '');
+            const trigger = document.querySelector(`[class*="${VIEW_MORE_ANCHOR_CLASS}"] button[aria-haspopup="menu"][aria-expanded="true"]`);
+            if (trigger === null) return;
+            // Watch first (it clears any previous mark), then close and mark: the
+            // tab-strip watcher must not treat the mark it is about to guard as stale.
+            watchTabs(trigger);
+            trigger.click();
+            trigger.setAttribute(VIEW_MORE_EMPTY_ATTR, '');
+          }
+
+          const observer = new MutationObserver((records) => {
+            for (const record of records) {
+              for (const node of record.addedNodes) {
+                if (!(node instanceof Element)) continue;
+                const surface = node.hasAttribute(MENU_SURFACE_ATTR)
+                  ? node
+                  : node.querySelector(`[${MENU_SURFACE_ATTR}]`);
+                if (surface === null) continue;
+                if (typeof surface.className !== 'string') continue;
+                if (!surface.className.includes(VIEW_MORE_MENU_CLASS)) continue;
+                filter(surface);
+              }
+            }
+          });
+          observer.observe(document.body, { childList: true });
+
+          return () => {
+            observer.disconnect();
+            restoreLaunchers();
+          };
+        }
+
+        /**
+         * Mounts {@link mountViewActions} for as long as the plugin is loaded;
+         * like the 「更多」 pass it only corrects DOM the shell owns, so the
+         * overlay occupant paints nothing.
+         */
+        function ViewActions() {
+          React.useEffect(() => mountViewActions(), []);
+          return null;
+        }
+
         /**
          * Carries the chrome adjustments, mounted unconditionally on the
          * frame-wide overlay layer so they apply in every mode. Rendering a
@@ -2009,6 +2162,15 @@ window.__ModuleLoader__.load({
           order: 3,
           locale: LOCALE_NS,
         }, MoreInline));
+
+        // The conversation view row's own 「更多」 menu: same idea, different menu.
+        // It strips the two plugin-discovery rows and retires the launcher while
+        // it would open empty.
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'daily-chat-view-actions',
+          order: 4,
+        }, ViewActions));
 
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
