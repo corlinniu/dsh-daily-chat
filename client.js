@@ -91,6 +91,20 @@ window.__ModuleLoader__.load({
     const LOCALE_NS = 'dailyChat';
     /** The single localStorage key holding the active mode. */
     const MODE_KEY = 'dsh.daily-chat.mode';
+    /**
+     * The single localStorage key holding the archived-row filter. It is kept
+     * apart from the mode because the two are independent: switching to work
+     * and back must not reset which archived chats the list is showing.
+     */
+    const ARCHIVED_FILTER_KEY = 'dsh.daily-chat.archived-filter';
+    /**
+     * The three visibility choices for archived chats, spelled exactly as the
+     * workspace browser spells its own: `default` hides them, `show` mixes them
+     * into the list, `only` shows nothing else. Same values, same semantics.
+     */
+    const ARCHIVED_FILTERS = ['default', 'show', 'only'];
+    /** How long a success notice stays up, matching the workspace browser's toast. */
+    const TOAST_HOLD_MS = 6000;
     /** The `<html>` attribute the mode-scoped chrome rules hang off. */
     const MODE_ATTRIBUTE = 'data-dsc-mode';
     /** The agent preset a daily chat runs on. */
@@ -193,6 +207,50 @@ window.__ModuleLoader__.load({
       startWork: '开始工作',
       moreCollapse: '收起',
       newChat: '新建日常聊天',
+      // Row actions. The words are the workspace browser's own, so the two
+      // lists read the same way; only the controls differ in where they sit.
+      pin: '置顶会话',
+      unpin: '取消置顶',
+      archive: '归档会话',
+      unarchive: '取消归档',
+      pinned: '已置顶',
+      pinFailed: '置顶失败，请稍后重试',
+      unpinFailed: '取消置顶失败，请稍后重试',
+      archiveFailed: '归档失败，请稍后重试',
+      unarchiveFailed: '取消归档失败，请稍后重试',
+      archiveActiveBlocked: '这个会话还在运行，停止后才能归档。',
+      // The archive notice is the shipped one, word for word: the toast reads
+      // 「会话已归档，可 [撤销] 或 [筛选已归档会话]」, with the two action
+      // buttons inline — not a bespoke card with separate buttons.
+      archivedNotice: '会话已归档，可',
+      stoppedArchivedNotice: '已停止并归档，可',
+      toastOr: '或',
+      undo: '撤销',
+      filterArchived: '筛选已归档会话',
+      archivedNotOpenable: '已归档对话暂时无法查看，请取消归档后查看',
+      // Archived-row filtering, the same three choices the workspace browser
+      // offers under its 「视图选项」 menu.
+      viewOptions: '视图选项',
+      filterLabel: '筛选会话',
+      hideArchived: '隐藏已归档',
+      showArchived: '全部对话（显示已归档）',
+      onlyArchived: '仅显示已归档',
+      noneArchived: '暂无已归档会话',
+      viewOthers: '查看其他会话',
+      // The confirmation the workspace browser raises before archiving a
+      // session that is still working.
+      archiveConfirmTitle: '停止并归档此会话？',
+      archiveConfirmDesc: '“{title}”仍有正在进行的工作。归档会先停止这些工作；之后可在侧栏筛选“全部对话（显示已归档）”中恢复会话，被停止的工作不会自动继续。',
+      archiveConfirmActivity: '将被停止的工作',
+      archiveConfirmTurn: '进行中的回合',
+      archiveConfirmSubagents: '{n} 个运行中的子智能体：{names}',
+      archiveConfirmJobs: '{n} 个后台任务：{names}',
+      archiveConfirmSchedules: '{n} 条定时提醒：{names}',
+      archiveConfirmOther: '{n} 项其他工作（{kind}）',
+      archiveConfirmListSeparator: '、',
+      archiveConfirmAction: '停止并归档',
+      archiveConfirmPending: '正在停止并归档…',
+      cancel: '取消',
       lockedProject: '日常聊天固定在自己的工作区，不能切换项目。要开始工作，请点侧边栏的「开始工作」。',
       starting: '正在打开日常聊天…',
       startingWork: '正在切换到工作模式…',
@@ -219,6 +277,41 @@ window.__ModuleLoader__.load({
       startWork: 'Start working',
       moreCollapse: 'Collapse',
       newChat: 'New chat',
+      pin: 'Pin session',
+      unpin: 'Unpin session',
+      archive: 'Archive session',
+      unarchive: 'Unarchive session',
+      pinned: 'Pinned',
+      pinFailed: 'Could not pin the session. Try again.',
+      unpinFailed: 'Could not unpin the session. Try again.',
+      archiveFailed: 'Could not archive the session. Try again.',
+      unarchiveFailed: 'Could not unarchive the session. Try again.',
+      archiveActiveBlocked: 'This chat is still working. Stop it before archiving.',
+      archivedNotice: 'Session archived. You can ',
+      stoppedArchivedNotice: 'Stopped and archived. You can ',
+      toastOr: ' or ',
+      undo: 'Undo',
+      filterArchived: 'Filter archived sessions',
+      archivedNotOpenable: 'Archived sessions cannot be opened. Unarchive it to view.',
+      viewOptions: 'View options',
+      filterLabel: 'Filter sessions',
+      hideArchived: 'Hide archived',
+      showArchived: 'All conversations (show archived)',
+      onlyArchived: 'Only archived',
+      noneArchived: 'No archived sessions yet',
+      viewOthers: 'View other sessions',
+      archiveConfirmTitle: 'Stop and archive this session?',
+      archiveConfirmDesc: '“{title}” still has work in progress. Archiving stops that work first; the session can be recovered later under “All conversations (show archived)”. Stopped work does not resume automatically.',
+      archiveConfirmActivity: 'Work that will be stopped',
+      archiveConfirmTurn: 'A running turn',
+      archiveConfirmSubagents: '{n} running subagents: {names}',
+      archiveConfirmJobs: '{n} background jobs: {names}',
+      archiveConfirmSchedules: '{n} scheduled reminders: {names}',
+      archiveConfirmOther: '{n} other work items ({kind})',
+      archiveConfirmListSeparator: ', ',
+      archiveConfirmAction: 'Stop and archive',
+      archiveConfirmPending: 'Stopping and archiving…',
+      cancel: 'Cancel',
       lockedProject: 'A chat stays in its own workspace — use “Start working” in the sidebar to open a project.',
       starting: 'Opening chat…',
       startingWork: 'Switching to work…',
@@ -250,6 +343,12 @@ window.__ModuleLoader__.load({
       // The overlay layer itself is click-through, so an occupant opts back in.
       '.dsc-toast{position:fixed;bottom:18px;left:18px;z-index:60;pointer-events:auto;display:flex;align-items:flex-start;gap:10px;max-width:360px;padding:10px 12px;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-overlay);border:1px solid var(--dsw-alias-border-l2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18)}',
       '.dsc-toast-text{min-width:0;word-break:break-word}',
+      // A notice that carries actions (undo / filter) stacks them under its
+      // text, the way the workspace browser's own toast does.
+      '.dsc-toast-body{display:flex;flex-direction:column;gap:6px;min-width:0}',
+      '.dsc-toast-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px}',
+      '.dsc-toast-action{padding:0;font:inherit;font-size:12px;color:var(--dsw-alias-link);cursor:pointer;background:transparent;border:0}',
+      '.dsc-toast-action:hover{text-decoration:underline}',
       '.dsc-toast-close{flex:none;padding:0;font:inherit;font-size:12px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0}',
       '.dsc-toast-close:hover{color:var(--dsw-alias-label-primary)}',
 
@@ -279,6 +378,9 @@ window.__ModuleLoader__.load({
       // at the start either way, so the distribution needs no rail override.
       '.dsc-head{box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:4px;height:36px;margin-top:2px;margin-bottom:4px;padding-left:4px;color:var(--dsw-alias-label-tertiary);border-radius:12px;flex:none;overflow:hidden}',
       '.dsc-title{white-space:nowrap;min-width:0;max-width:45%;flex:none;line-height:20px;overflow:hidden}',
+      // The header's controls: the archive-filter menu and the add button, in
+      // the workspace browser's own order (view options, then add).
+      '.dsc-headactions{display:flex;flex:none;align-items:center;gap:4px}',
       // A rail is for picking a mode, not for browsing or for starting one. The
       // shipped browser renders neither its label nor its list when collapsed;
       // 日常's one remaining control in the section would be the add button, and
@@ -287,12 +389,14 @@ window.__ModuleLoader__.load({
       // leaving one misaligned glyph behind it.
       '.dsc-rail .dsc-head{display:none}',
       '.dsc-rail .dsc-listArea{display:none}',
-      // The section header's add control is the shipped workspace browser's icon
-      // button, declaration for declaration (`.bhn1Oq_iconButton` in
-      // @deepseek-ai/dsh-client-ui-workspace): a bare 28px round button that
-      // only paints on hover. 日常 replaces that browser in the sidebar, so its
-      // own header has to carry the same affordance in the same clothes.
-      '.dsc-new{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0;border-radius:50%;corner-shape:round}',
+      // The section header's two controls are the shipped workspace browser's
+      // own icon button, declaration for declaration (`.bhn1Oq_iconButton` in
+      // @deepseek-ai/dsh-client-ui-workspace): a bare 28px control, the small
+      // `--dsw-radius-sm` corner (NOT a circle — captured from the 0.2.x
+      // browser's hover square), and the same hover wash. 日常 replaces that
+      // browser in the sidebar, so its own header carries the same affordances
+      // in the same clothes: 「视图选项」 and 「新建日常聊天」.
+      '.dsc-new{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;font:inherit;color:var(--dsw-alias-label-secondary);cursor:pointer;background:transparent;border:0;border-radius:var(--dsw-radius-sm)}',
       '.dsc-new:hover{background:var(--dsw-alias-interactive-bg-hover)}',
       // The list sits in a wrapper that mirrors `.bhn1Oq_listArea`, and that
       // wrapper is what decides where the scrollbar ends up: it pulls back out
@@ -316,11 +420,25 @@ window.__ModuleLoader__.load({
       // title's 20px line box (below) plus 6px of vertical padding.
       // The row's hover paint is 工作's own: the same
       // `--dsw-alias-interactive-bg-hover` (a translucent ink, not a solid
-      // layer) inside the same `--dsw-radius-md` corner. A daily row has no
-      // hover actions to show, but the highlight it sits under is the one the
-      // session row next to it uses.
-      '.dsc-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:var(--dsw-radius-md)}',
-      '.dsc-row:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      // layer) inside the same `--dsw-radius-md` corner. A selected row keeps
+      // that paint standing, exactly like the workspace browser's selected row.
+      //
+      // The row is a `<div role="treeitem">`, not a `<button>`: it now owns two
+      // nested action buttons (archive and pin), and interactive elements must
+      // not nest inside a button. Enter and Space open it the way the shipped
+      // session row does, and the nested buttons stop propagation themselves.
+      // The row is now a `<div>` (it has to hold the two action buttons), so it
+      // has to say `border-box` itself: a button used to get that from the UA
+      // stylesheet, and `width:100%` + 16px of horizontal padding on a
+      // content-box div would make every row 16px wider than the list and clip
+      // the right-hand action against the list's edge.
+      '.dsc-row{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;font:inherit;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:var(--dsw-radius-md)}',
+      '.dsc-row:hover,.dsc-row[aria-selected="true"]{background:var(--dsw-alias-interactive-bg-hover)}',
+      // An archived row reads the way 工作's archived row reads: the title drops
+      // to the caption ink and the status dot goes quiet. Nothing else moves —
+      // it keeps its slot, its age, and its hover actions.
+      '.dsc-row-archived .dsc-rowtitle{color:var(--dsw-alias-label-caption)}',
+      '.dsc-row-archived .dsc-dot{background:var(--dsw-alias-label-caption);opacity:.6}',
       '.dsc-dot{flex:none;width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-border-l2)}',
       '.dsc-dot-on{background:var(--dsw-alias-state-success-primary)}',
       // The title is the workspace browser's `.title`, declaration for
@@ -333,10 +451,36 @@ window.__ModuleLoader__.load({
       // The trailing age cell is the workspace browser's `.time`, declaration
       // for declaration (see @deepseek-ai/dsh-client-ui-workspace's
       // Rows.module.css): 10px/16px in the tertiary ink, taking no width from
-      // the title. One deliberate difference: the workspace row swaps this cell
-      // for its hover actions, while a daily row has no actions to swap in, so
-      // the age stays put in every row state.
-      '.dsc-rowtime{flex:none;font-size:10px;line-height:16px;color:var(--dsw-alias-label-tertiary)}',
+      // the title. Like 工作's row, it shares a resting cell with the pinned
+      // marker and gives that cell up to the row actions on hover.
+      '.dsc-rowtime{flex:none;margin-inline-end:-1px;font-size:10px;line-height:16px;color:var(--dsw-alias-label-tertiary)}',
+      // `.rowResting`: the age plus, when the row is pinned, the pin marker.
+      // The marker is the workspace browser's own `PinnedIndicator`: a 16px
+      // cell holding a 14px filled pin in the caption ink. The spacing is the
+      // shipped pair, too — the resting cell is a 6px-gap flex line and the
+      // marker itself sits at `margin-left:0` inside it (the shipped stylesheet
+      // overrides the marker's own 6px for exactly this context), so the icon
+      // lands where 工作 puts it instead of 6px further along.
+      '.dsc-rowresting{flex:none;display:inline-flex;align-items:center;gap:6px}',
+      '.dsc-rowpin{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:20px;margin-left:0;color:var(--dsw-alias-label-caption)}',
+      // `.rowActions`: the hover-only band the row swaps in for the resting
+      // cell. Two 24px bare icon buttons with the workspace browser's 13px gap
+      // and -4px optical margin, archive first, pin second — its own order.
+      '.dsc-rowactions{flex:none;display:none;align-items:center;gap:13px}',
+      '.dsc-rowact{flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;margin:-4px;padding:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:transparent;border:0;border-radius:var(--dsw-radius-xs)}',
+      '.dsc-rowact:hover{color:var(--dsw-alias-label-primary)}',
+      // Same swap 工作's session row performs, with the same two triggers it
+      // recognises: hover, and keyboard focus — and only keyboard focus. A
+      // MOUSE click on the pin button also leaves focus inside the row, but the
+      // shipped stylesheet deliberately does not count that as a resting-state
+      // swap: once the pointer leaves, the row goes back to 「time + pin」 and
+      // the archive button disappears again. Without the modality check the
+      // just-pinned row would keep showing its action buttons after the click,
+      // which is exactly the mismatch this rule fixes (the shipped selector is
+      // `html[data-input-modality=keyboard] .sessionRow:focus-within …`).
+      '@media (hover:hover){.dsc-row:hover .dsc-rowresting{display:none}.dsc-row:hover .dsc-rowactions{display:inline-flex}html[data-input-modality="keyboard"] .dsc-row:focus-within .dsc-rowresting{display:none}html[data-input-modality="keyboard"] .dsc-row:focus-within .dsc-rowactions{display:inline-flex}}',
+      '@media (hover:none){.dsc-rowresting{display:none}.dsc-rowactions{display:inline-flex}}',
+
       // The page trigger. It is neither a row nor a control: a 1px strip at the
       // end of the painted window that only the observer looks at. It needs a
       // box — a zero-area target is not reliably reported as intersecting —
@@ -344,6 +488,19 @@ window.__ModuleLoader__.load({
       // order. Scrolling it into view is what asks for the next page.
       '.dsc-pager{flex:none;height:1px;pointer-events:none}',
       '.dsc-empty{padding:10px 8px;font-size:12.5px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      // The archived-only empty state, borrowed whole from the workspace
+      // browser's `EmptySessions`: a glyph over a line, with the way back to the
+      // ordinary list underneath. Its geometry is the shipped one (centered,
+      // 80px down, 13px/20px tertiary ink).
+      '.dsc-emptyarchived{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:80px;padding:0 12px;text-align:center;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary)}',
+      '.dsc-emptyarchived > svg{color:var(--dsw-alias-label-caption);margin-bottom:4px}',
+      '.dsc-emptylink{padding:0;font:inherit;font-size:13px;line-height:20px;color:var(--dsw-alias-link);cursor:pointer;background:transparent;border:0}',
+      // The stop-and-archive confirmation's activity list, matching the shipped
+      // dialog: a plain bulleted list under the description.
+      '.dsc-archiveactivity{margin:0 0 8px;padding-left:18px;color:var(--dsw-alias-label-primary);font-size:13px;line-height:20px}',
+      '.dsc-archiveactivity li{overflow-wrap:anywhere}',
+      '.dsc-archivestatus{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}',
+      '.dsc-archiveerror{margin-top:8px;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}',
     ].join('');
 
     /**
@@ -583,7 +740,35 @@ window.__ModuleLoader__.load({
       }
     }
 
-    let state = { mode: readMode(), busy: false, error: null, moreMenuReady: false };
+    /**
+     * Read the persisted archived-row filter. Anything unknown — an older value,
+     * a cleared storage, a hand-edited string — means the shipped default:
+     * archived chats are hidden, exactly like 工作's out-of-the-box view.
+     * @returns one of {@link ARCHIVED_FILTERS}.
+     */
+    function readArchivedFilter() {
+      try {
+        if (typeof localStorage === 'undefined') return 'default';
+        const saved = localStorage.getItem(ARCHIVED_FILTER_KEY);
+        return ARCHIVED_FILTERS.indexOf(saved) === -1 ? 'default' : saved;
+      } catch (reason) {
+        console.warn('[daily-chat] reading the saved archived filter failed:', reason);
+        return 'default';
+      }
+    }
+
+    let state = {
+      mode: readMode(),
+      busy: false,
+      error: null,
+      moreMenuReady: false,
+      /** Which of {@link ARCHIVED_FILTERS} the daily list is showing. */
+      archivedFilter: readArchivedFilter(),
+      /** The transient success notice: `{ seq, text, actions }`, or null. */
+      notice: null,
+      /** A pending stop-and-archive confirmation: `{ sessionId, displayTitle, activity }`, or null. */
+      archiveRequest: null,
+    };
     const listeners = new Set();
 
     /**
@@ -604,7 +789,7 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Merge one state patch, persist the mode, and notify every reader. */
+    /** Merge one state patch, persist the mode and the filter, and notify every reader. */
     function setState(patch) {
       state = Object.assign({}, state, patch);
       if (patch.mode !== undefined) {
@@ -614,6 +799,13 @@ window.__ModuleLoader__.load({
           console.warn('[daily-chat] saving the mode failed:', reason);
         }
         syncModeAttribute(patch.mode);
+      }
+      if (patch.archivedFilter !== undefined) {
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(ARCHIVED_FILTER_KEY, patch.archivedFilter);
+        } catch (reason) {
+          console.warn('[daily-chat] saving the archived filter failed:', reason);
+        }
       }
       for (const listener of [...listeners]) listener();
     }
@@ -642,7 +834,7 @@ window.__ModuleLoader__.load({
     // stable empty snapshot instead of guessing keeps the hook order fixed and
     // degrades to an empty list rather than a crash when a source is absent.
     const EMPTY_WORKSPACES = {
-      items: [], archivedSessionIds: [], state: 'idle', phase: 'pending', error: null,
+      items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'pending', error: null,
     };
     const EMPTY_SESSIONS = {
       ids: [], byId: {}, phase: 'pending', subagentsByParent: {}, jobsBySession: {},
@@ -668,10 +860,73 @@ window.__ModuleLoader__.load({
      * header. Taken from the primitives module rather than hand-drawn, because
      * the point of the control is that it looks like the one 日常 replaced; a
      * deployment whose primitives predate it falls back to a bare plus.
+     *
+     * Two export names cover the two generations of that glyph in DSH:
+     * `IconProjectAddOutline16` (the name this plugin has always used) and the
+     * current `IconProjectAddOutlineRegular`, which is what the shipped header
+     * itself draws in 0.2.x. Without the second fallback the button degrades to
+     * a text plus on a current install instead of matching its neighbour.
      */
     const AddGlyph = typeof primitives.IconProjectAddOutline16 === 'function'
       ? primitives.IconProjectAddOutline16
-      : null;
+      : (typeof primitives.IconProjectAddOutlineRegular === 'function'
+        ? primitives.IconProjectAddOutlineRegular
+        : null);
+
+    /**
+     * One primitives glyph, or null when this deployment predates it. Used for
+     * the pin/archive artwork the workspace browser draws on its own rows: a
+     * build without those exports loses the buttons and keeps the list, never
+     * the other way round.
+     */
+    function primitiveGlyph(name) {
+      return typeof primitives[name] === 'function' ? primitives[name] : null;
+    }
+
+    /** The pin glyphs: outline on an ordinary row, filled once pinned. */
+    const PinGlyph = primitiveGlyph('IconPinOutlineRegular');
+    const PinFilledGlyph = primitiveGlyph('IconPinFillRegular');
+    /** Archive / unarchive row glyphs, plus the three filter-menu glyphs. */
+    const ArchiveGlyph = primitiveGlyph('IconArchiveOutlineRegular');
+    const UnarchiveGlyph = primitiveGlyph('IconUnarchiveOutlineRegular');
+    const ArchiveOffGlyph = primitiveGlyph('IconArchiveOffOutlineRegular');
+    const QueueGlyph = primitiveGlyph('IconQueueOutlineRegular');
+    const ArchiveCheckGlyph = primitiveGlyph('IconArchiveCheckOutlineRegular');
+    /** The workspace browser's 「视图选项」 glyph, reused for the filter control. */
+    const SlidersGlyph = primitiveGlyph('IconSlidersTwoOutlineRegular');
+    /** The warning glyph the shipped failure toasts put in front of their text. */
+    const WarningGlyph = primitiveGlyph('IconWarningOutlineRegular');
+    /** Shared primitives the row actions and filter menu need, when present. */
+    const TooltipComponent = typeof primitives.Tooltip === 'function' ? primitives.Tooltip : null;
+    const MenuComponent = typeof primitives.Menu === 'function' ? primitives.Menu : null;
+    const ModalComponent = typeof primitives.Modal === 'function' ? primitives.Modal : null;
+    const ButtonComponent = typeof primitives.Button === 'function' ? primitives.Button : null;
+    /**
+     * The shipped toast the workspace browser raises for its own row actions.
+     * Using it — rather than a card of our own — is what makes 「归档」's
+     * 「会话已归档，可 [撤销] 或 [筛选已归档会话]」 read and sit exactly like
+     * the one 工作 shows: top-center, success mark, inline action buttons.
+     */
+    const ToastComponent = typeof primitives.Toast === 'function' ? primitives.Toast : null;
+
+    /**
+     * Hang a label on one control, with the workspace browser's own tooltip
+     * behaviour (bottom, end-aligned, half-second delay). Without the primitive
+     * the control keeps its `title`/`aria-label`, so nothing becomes unusable.
+     * @param label - text to show.
+     * @param child - the control element.
+     * @returns the wrapped control, or the control itself.
+     */
+    function withTooltip(label, child) {
+      if (TooltipComponent === null) return child;
+      return h(TooltipComponent, {
+        label,
+        side: 'bottom',
+        align: 'end',
+        delayMs: 500,
+        portal: true,
+      }, child);
+    }
 
     /**
      * The menu row the shell's own 「更多」 uses. Borrowed from the shared
@@ -1208,6 +1463,244 @@ window.__ModuleLoader__.load({
           ctx.uiWorkspace.openSession(sessionId);
         }
 
+        /* ── pin & archive ────────────────────────────────────────────────── */
+
+        // The workspace browser's own two row actions, over the same model:
+        // pinning and archiving go through the Host-global sets, so a chat
+        // pinned (or archived) from 日常 is pinned (or archived) for 工作 too.
+        // Everything the shipped browser does around the call — the fronted
+        // order, the failure notices, the stop-and-archive confirmation, the
+        // archived-only filter — is reproduced here, because this list stands
+        // in for that browser and must not behave like a second, weaker one.
+
+        /** Bumped per notice, so the toast is remounted only for a new message. */
+        let noticeSeq = 0;
+
+        /**
+         * Raise one row-action notice.
+         *
+         * The notice is deliberately shaped the way the workspace browser
+         * shapes its own: a sentence the inline actions continue from
+         * (「会话已归档，可 [撤销] 或 [筛选已归档会话]」), a success or warning
+         * tone, and the shipped six-second hold for successes. {@link
+         * RowActionToast} is what paints it, through the shipped `Toast`
+         * primitive, so placement and clothes are DSH's rather than ours.
+         * @param text - the sentence the actions continue from.
+         * @param tone - `success` for a completed action, `warning` for a refusal.
+         * @param actions - optional `{ label, prefix, run }` inline buttons.
+         */
+        function notifyNotice(text, tone, actions) {
+          noticeSeq += 1;
+          const warning = tone === 'warning';
+          setState({
+            notice: {
+              seq: noticeSeq,
+              text,
+              tone: warning ? 'warning' : 'success',
+              holdMs: warning ? undefined : TOAST_HOLD_MS,
+              actions: (Array.isArray(actions) ? actions : []).map((action) => ({
+                label: action.label,
+                ...(action.prefix === undefined ? {} : { prefix: action.prefix }),
+                onClick: () => {
+                  dismissNotice();
+                  if (typeof action.run === 'function') action.run();
+                },
+              })),
+            },
+          });
+        }
+
+        /** Take the current notice down. */
+        function dismissNotice() {
+          if (state.notice !== null) setState({ notice: null });
+        }
+
+        /**
+         * Switch which archived rows the daily list shows, and remember it.
+         * @param filter - one of {@link ARCHIVED_FILTERS}.
+         */
+        function setArchivedFilter(filter) {
+          if (ARCHIVED_FILTERS.indexOf(filter) === -1 || state.archivedFilter === filter) return;
+          setState({ archivedFilter: filter });
+        }
+
+        /**
+         * A session's human title, for the stop-and-archive confirmation.
+         * @param sessionId - the session being archived.
+         * @returns its display title, or the id when the snapshot has none.
+         */
+        function dailyTitleOf(sessionId) {
+          try {
+            const row = ctx.sessions.list.getSnapshot().byId[sessionId];
+            if (row !== undefined) {
+              if (typeof row.displayTitle === 'string' && row.displayTitle !== '') return row.displayTitle;
+              if (typeof row.title === 'string' && row.title !== '') return row.title;
+            }
+          } catch (reason) {
+            console.warn('[daily-chat] reading a daily chat title failed:', reason);
+          }
+          return sessionId;
+        }
+
+        /**
+         * The work a Host refusal said is still running, or undefined for any
+         * other failure.
+         *
+         * Error-class identity does not cross client plugin bundles, so — as in
+         * the shipped browser — the test is by `name` plus the Remote error
+         * code, not by `instanceof`.
+         * @param reason - the rejected archive call.
+         * @returns the reported activity list, or undefined when this was not
+         *   the `workspace/session-active` refusal.
+         */
+        function activeArchiveActivity(reason) {
+          if (reason === null || typeof reason !== 'object') return undefined;
+          if (reason instanceof Error && reason.name !== 'WorkspaceArchiveError') return undefined;
+          const rpc = reason.rpcError;
+          if (rpc === null || typeof rpc !== 'object' || rpc.code !== 'workspace/session-active') return undefined;
+          const details = rpc.details;
+          const activity = details === null || details === undefined ? undefined : details.activity;
+          return Array.isArray(activity) ? activity : [];
+        }
+
+        /**
+         * The actions a successful archive offers, in the shipped order: undo
+         * it, then — after 「或」 — switch the list to the archived filter to
+         * find it again. Same wording, same order and same inline placement as
+         * the workspace browser's own archive notice, including its one
+         * conditional: the filter action is only offered while archived rows
+         * are still hidden (offering it from the archived view would be a
+         * button that does nothing visible).
+         * @param sessionId - the session that was archived.
+         * @returns the notice actions, in `notifyNotice`'s shape.
+         */
+        function archiveNoticeActions(sessionId) {
+          const actions = [
+            {
+              label: t('undo'),
+              run: () => unarchiveDaily(sessionId),
+            },
+          ];
+          if (state.archivedFilter === 'default') {
+            actions.push({
+              label: t('filterArchived'),
+              prefix: t('toastOr'),
+              run: () => setArchivedFilter('show'),
+            });
+          }
+          return actions;
+        }
+
+        /**
+         * Archive one daily chat.
+         *
+         * A chat with work still running is refused by the Host with
+         * `workspace/session-active`; that refusal becomes the shipped
+         * stop-and-archive confirmation instead of an error, because silently
+         * killing a running turn is not a thing an archive button may do.
+         * @param sessionId - the session to archive.
+         */
+        function archiveDaily(sessionId) {
+          Promise.resolve()
+            .then(() => ctx.uiWorkspace.archiveSession(sessionId))
+            .then(() => {
+              notifyNotice(t('archivedNotice'), 'success', archiveNoticeActions(sessionId));
+            })
+            .catch((reason) => {
+              const activity = activeArchiveActivity(reason);
+              if (activity !== undefined) {
+                if (ModalComponent === null) {
+                  notifyNotice(t('archiveActiveBlocked'), 'warning');
+                  return;
+                }
+                setState({
+                  archiveRequest: {
+                    sessionId,
+                    displayTitle: dailyTitleOf(sessionId),
+                    activity,
+                  },
+                });
+                return;
+              }
+              console.warn('[daily-chat] archiving a daily chat failed:', reason);
+              notifyNotice(t('archiveFailed'), 'warning');
+            });
+        }
+
+        /**
+         * Restore one archived daily chat. Idempotent on the Host, so a lost
+         * race with another surface resolves as a no-op.
+         * @param sessionId - the session to unarchive.
+         */
+        function unarchiveDaily(sessionId) {
+          Promise.resolve()
+            .then(() => ctx.uiWorkspace.unarchiveSession(sessionId))
+            .catch((reason) => {
+              console.warn('[daily-chat] unarchiving a daily chat failed:', reason);
+              notifyNotice(t('unarchiveFailed'), 'warning');
+            });
+        }
+
+        /**
+         * Pin one daily chat to the front of the list. The shipped service also
+         * fronts it in the browser's saved manual order, so 工作's manual view
+         * agrees with this one.
+         * @param sessionId - the session to pin.
+         */
+        function pinDaily(sessionId) {
+          Promise.resolve()
+            .then(() => ctx.uiWorkspace.pinSession(sessionId))
+            .catch((reason) => {
+              console.warn('[daily-chat] pinning a daily chat failed:', reason);
+              notifyNotice(t('pinFailed'), 'warning');
+            });
+        }
+
+        /**
+         * Drop one daily chat's pin.
+         * @param sessionId - the session to unpin.
+         */
+        function unpinDaily(sessionId) {
+          Promise.resolve()
+            .then(() => ctx.uiWorkspace.unpinSession(sessionId))
+            .catch((reason) => {
+              console.warn('[daily-chat] unpinning a daily chat failed:', reason);
+              notifyNotice(t('unpinFailed'), 'warning');
+            });
+        }
+
+        /**
+         * The confirmation's `停止并归档`: stop what the Host listed, then
+         * archive. Errors stay in the dialog so it can be retried or cancelled.
+         * @param sessionId - the session to stop and archive.
+         */
+        async function stopAndArchiveDaily(sessionId) {
+          await ctx.uiWorkspace.archiveSession(sessionId, { stopActivity: true });
+          setState({ archiveRequest: null });
+          notifyNotice(t('stoppedArchivedNotice'), 'success', archiveNoticeActions(sessionId));
+        }
+
+        /**
+         * One line of the confirmation's activity list, in the shipped wording.
+         * @param entry - one `{ kind, items }` activity record from the Host.
+         * @returns the localized line.
+         */
+        function archiveActivityLine(entry) {
+          if (entry === null || typeof entry !== 'object') return '';
+          const items = Array.isArray(entry.items) ? entry.items : [];
+          const names = items
+            .map((item) => (item === null || typeof item !== 'object' ? '' : String(item.label ?? item.id ?? '')))
+            .join(t('archiveConfirmListSeparator'));
+          const n = items.length;
+          switch (entry.kind) {
+            case 'turn': return t('archiveConfirmTurn');
+            case 'subagent': return t('archiveConfirmSubagents', { n, names });
+            case 'job': return t('archiveConfirmJobs', { n, names });
+            case 'schedule': return t('archiveConfirmSchedules', { n, names });
+            default: return t('archiveConfirmOther', { n, kind: String(entry.kind ?? '') });
+          }
+        }
+
         /**
          * The Host code a failed create carried, when it carried one.
          *
@@ -1375,24 +1868,70 @@ window.__ModuleLoader__.load({
         /* ── the entry row, and the daily home it opens ───────────────────── */
 
         /**
-         * Conversations accounted to the daily workspace, newest first.
+         * Conversations accounted to the daily workspace, in the workspace
+         * browser's own order and under its own archived filter.
+         *
+         * Pinned rows lead — newest first among themselves — and everything
+         * else follows newest first, exactly what the shipped browser does in
+         * its default 「最近更新」 order: `sectionMembers` fronts the pinned
+         * partition without touching either side's order. Archival follows the
+         * filter: hidden by default, mixed in for `show`, alone for `only`.
+         * Blank and subagent rows stay out in every case, as before.
+         *
          * @param workspaces - the workspace snapshot.
          * @param sessions - the session-list snapshot.
+         * @param archivedFilter - one of {@link ARCHIVED_FILTERS}.
          * @returns the rows both daily surfaces render.
          */
-        function dailyRows(workspaces, sessions) {
+        function dailyRows(workspaces, sessions, archivedFilter) {
           const workspace = pickDailyWorkspace(workspaces.items);
           if (workspace === undefined || sessions.phase !== 'ready') return [];
-          const archived = workspaces.archivedSessionIds;
+          const archivedIds = Array.isArray(workspaces.archivedSessionIds) ? workspaces.archivedSessionIds : [];
+          const pinnedIds = Array.isArray(workspaces.pinnedSessionIds) ? workspaces.pinnedSessionIds : [];
+          const archived = new Set(archivedIds);
+          const pinned = new Set(pinnedIds);
+          const filter = ARCHIVED_FILTERS.indexOf(archivedFilter) === -1 ? 'default' : archivedFilter;
           const rows = [];
           for (const id of workspace.sessionIds) {
-            if (archived.indexOf(id) !== -1) continue;
             const row = sessions.byId[id];
             if (row === undefined || row.blank === true || row.origin === 'subagent') continue;
-            rows.push(row);
+            const isArchived = archived.has(id);
+            if (filter === 'default' && isArchived) continue;
+            if (filter === 'only' && !isArchived) continue;
+            // A pinned row can never be archived (the Host refuses that pin),
+            // so the two markers are mutually exclusive on screen as well.
+            rows.push(Object.assign({}, row, {
+              archived: isArchived,
+              pinned: !isArchived && pinned.has(id),
+            }));
           }
-          rows.sort((left, right) => right.updatedAt - left.updatedAt);
-          return rows;
+          rows.sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0));
+          // Stable partition, not a second sort: pinned rows keep their recency
+          // order among themselves, and so does the rest.
+          const leading = rows.filter((row) => row.pinned);
+          const rest = rows.filter((row) => !row.pinned);
+          return leading.concat(rest);
+        }
+
+        /**
+         * The session the centre column currently shows, for the selected-row
+         * highlight. Read from the Session list exactly the way the workspace
+         * browser reads it: the entry retained by the main view.
+         * @param sessions - the session-list snapshot.
+         * @returns the session id, or undefined when nothing is open.
+         */
+        function currentDailySessionId(sessions) {
+          try {
+            for (const id of sessions.ids) {
+              const row = sessions.byId[id];
+              if (row === undefined) continue;
+              const retainedBy = row.retainedBy;
+              if (retainedBy !== undefined && retainedBy !== null && retainedBy.mainView > 0) return id;
+            }
+          } catch (reason) {
+            console.warn('[daily-chat] reading the open daily chat failed:', reason);
+          }
+          return undefined;
         }
 
         /**
@@ -2052,7 +2591,9 @@ window.__ModuleLoader__.load({
 
         /**
          * A failed start has no room to print itself in a sidebar row, so it
-         * surfaces as a transient card on the frame-wide overlay layer.
+         * surfaces as a transient card on the frame-wide overlay layer. This is
+         * the plugin's own failure card (the shipped toast is for row actions,
+         * see {@link RowActionToast}); action failures use that one instead.
          */
         function ErrorToast(props) {
           const t = props.t;
@@ -2071,17 +2612,320 @@ window.__ModuleLoader__.load({
           ]);
         }
 
+        /**
+         * The row-action notice: the shipped `Toast` primitive, carrying the
+         * same sentence and the same inline actions the workspace browser uses
+         * for its own pin/archive rows.
+         *
+         * That is the whole point of this component — an archive in 日常 must
+         * read 「会话已归档，可 [撤销] 或 [筛选已归档会话]」 at the same place
+         * DSH puts it, not a second, different card. The primitive owns the
+         * placement (top center, portalled to `<body>`), the success/warning
+         * mark and the hold timer; this component only supplies its content.
+         *
+         * A primitives build without `Toast` falls back to the plugin's own
+         * corner card with the same text and buttons, so the action is still
+         * recoverable — just not in the shipped clothes.
+         * @param props.t - translate seat bound to {@link LOCALE_NS}.
+         * @returns the notice, or null when there is none.
+         */
+        function RowActionToast(props) {
+          const t = props.t;
+          const chat = useChatState();
+          const notice = chat.notice;
+          if (notice === null) return null;
+          const actions = Array.isArray(notice.actions) ? notice.actions : [];
+
+          if (ToastComponent !== null) {
+            const toastProps = {
+              key: notice.seq,
+              text: notice.text,
+              onDone: dismissNotice,
+              ...(notice.tone === 'success' ? { tone: 'success' } : {}),
+              ...(notice.tone === 'warning' && WarningGlyph !== null ? { icon: h(WarningGlyph, {}) } : {}),
+              ...(notice.holdMs === undefined ? {} : { holdMs: notice.holdMs }),
+              ...(actions.length === 0 ? {} : { actions }),
+            };
+            return h(ToastComponent, toastProps);
+          }
+
+          return h('div', { className: 'dsc-toast', role: 'status' }, [
+            h('style', { key: 'css' }, CSS),
+            h('div', { className: 'dsc-toast-body', key: 'body' }, [
+              h('div', { className: 'dsc-toast-text', key: 'text' }, notice.text),
+              actions.length === 0 ? null : h('div', { className: 'dsc-toast-actions', key: 'actions' },
+                actions.map((action, index) => h('button', {
+                  key: String(index),
+                  type: 'button',
+                  className: 'dsc-toast-action',
+                  onClick: () => {
+                    if (typeof action.onClick === 'function') action.onClick();
+                  },
+                }, action.label))),
+            ]),
+            h('button', {
+              key: 'close',
+              type: 'button',
+              className: 'dsc-toast-close',
+              onClick: dismissNotice,
+            }, t('dismiss')),
+          ]);
+        }
+
         /* ── the daily browsing region ────────────────────────────────────── */
+
+        /**
+         * One 24px bare icon in a row's hover band, carrying the workspace
+         * browser's own tooltip and aria label.
+         * @param props.label - what the control does.
+         * @param props.glyph - the primitives icon component.
+         * @param props.run - the action.
+         * @returns the button, optionally wrapped in a tooltip.
+         */
+        function RowActionButton(props) {
+          const button = h('button', {
+            type: 'button',
+            className: 'dsc-rowact',
+            'aria-label': props.label,
+            onClick: (event) => {
+              event.stopPropagation();
+              props.run();
+            },
+          }, h(props.glyph, { size: 14 }));
+          return withTooltip(props.label, button);
+        }
+
+        /**
+         * One daily session row: the workspace browser's own 32px row, plus the
+         * two actions this list did not have before.
+         *
+         * Presentation is the shipped row's, line for line — status dot, title,
+         * then a resting cell holding the relative age and (when pinned) the
+         * same 14px pin marker 工作 draws. Hovering retires that cell and brings
+         * up archive and pin, archive first exactly as in the shipped order.
+         * An archived row is muted, keeps its age, and offers unarchive instead
+         * of archive; clicking it is refused with the shipped explanation
+         * rather than opening it.
+         *
+         * The row is a `div role="treeitem"`; on a real key press Enter/Space
+         * open it, while the nested action buttons keep their own clicks.
+         *
+         * @param props.row - the derived row (with `pinned` / `archived` flags).
+         * @param props.now - epoch ms for the age cell.
+         * @param props.selected - whether this session is the open one.
+         * @param props.t - translate seat bound to {@link LOCALE_NS}.
+         * @param props.useSessionAccess - the standard session access hook.
+         * @param props.onOpen - open the session (or refuse, when archived).
+         * @param props.onArchive / props.onUnarchive - archive actions.
+         * @param props.onPin / props.onUnpin - pin actions.
+         * @returns the row.
+         */
+        function DailyRow(props) {
+          const t = props.t;
+          const row = props.row;
+          const useSessionAccess = props.useSessionAccess;
+          // The shipped browser gates each action on the session's access
+          // snapshot. Both hook calls happen unconditionally, so the hook order
+          // is the same whether the row is pinned or archived; when the standard
+          // prop is absent (an older shell) nothing is gated, which is the
+          // status quo this list had before row actions existed.
+          const canArchive = typeof useSessionAccess === 'function'
+            ? useSessionAccess(row.id, row.archived ? 'workspace/unarchiveSession' : 'workspace/archiveSession')
+            : true;
+          const canPin = typeof useSessionAccess === 'function'
+            ? useSessionAccess(row.id, row.pinned ? 'workspace/unpinSession' : 'workspace/pinSession')
+            : true;
+          const open = () => props.onOpen(row);
+
+          const actions = [];
+          const archiveGlyph = row.archived ? UnarchiveGlyph : ArchiveGlyph;
+          if (canArchive && archiveGlyph !== null) {
+            actions.push(h(RowActionButton, {
+              key: 'archive',
+              label: t(row.archived ? 'unarchive' : 'archive'),
+              glyph: archiveGlyph,
+              run: () => (row.archived ? props.onUnarchive : props.onArchive)(row.id),
+            }));
+          }
+          if (canPin && !row.archived && PinGlyph !== null) {
+            actions.push(h(RowActionButton, {
+              key: 'pin',
+              label: t(row.pinned ? 'unpin' : 'pin'),
+              glyph: row.pinned && PinFilledGlyph !== null ? PinFilledGlyph : PinGlyph,
+              run: () => (row.pinned ? props.onUnpin : props.onPin)(row.id),
+            }));
+          }
+
+          return h('div', {
+            key: row.id,
+            className: 'dsc-row' + (row.archived ? ' dsc-row-archived' : ''),
+            role: 'treeitem',
+            'aria-selected': props.selected === true,
+            'aria-description': row.archived ? t('archivedNotOpenable') : undefined,
+            tabIndex: 0,
+            onClick: open,
+            onKeyDown: (event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+              event.preventDefault();
+              open();
+            },
+          }, [
+            h('span', {
+              key: 'dot',
+              className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
+            }),
+            h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
+            // Trailing cell, the way a workspace row carries it: the title cell
+            // keeps `flex:1` and clips, so the age (and the pin marker after it)
+            // never squeeze the title to nothing and never wrap.
+            h('span', { key: 'resting', className: 'dsc-rowresting' }, [
+              h('span', { key: 'time', className: 'dsc-rowtime' }, timeLabel(row.updatedAt, props.now, t)),
+              row.pinned && (PinFilledGlyph !== null || PinGlyph !== null) ? h('span', {
+                key: 'pin',
+                className: 'dsc-rowpin',
+                role: 'img',
+                'aria-label': t('pinned'),
+                title: t('pinned'),
+              }, h(PinFilledGlyph === null ? PinGlyph : PinFilledGlyph, { size: 14 })) : null,
+            ]),
+            actions.length === 0 ? null : h('span', {
+              key: 'actions',
+              className: 'dsc-rowactions',
+              onClick: (event) => {
+                event.stopPropagation();
+              },
+            }, actions),
+          ]);
+        }
+
+        /**
+         * The section header's 「视图选项」 control: which archived rows the list
+         * shows. Same control, same three choices and same glyph as the workspace
+         * browser's own view-options menu; absent when this deployment predates
+         * the `Menu` primitive, in which case the list keeps the shipped default
+         * (archived rows hidden).
+         * @param props.filter - the current {@link ARCHIVED_FILTERS} value.
+         * @param props.onFilter - switch the filter.
+         * @param props.t - translate seat bound to {@link LOCALE_NS}.
+         * @returns the filter button, or null.
+         */
+        function DailyViewOptions(props) {
+          const t = props.t;
+          const [open, setOpen] = React.useState(false);
+          if (MenuComponent === null) return null;
+          const filter = props.filter;
+          const selectedIds = [{
+            default: 'hide-archived',
+            show: 'show-archived',
+            only: 'only-archived',
+          }[filter] ?? 'hide-archived'];
+          const glyphIcon = (glyph) => (glyph === null ? undefined : h(glyph, {}));
+          const items = [
+            { type: 'label', id: 'filter-by', text: t('filterLabel') },
+            { id: 'hide-archived', label: t('hideArchived'), icon: glyphIcon(ArchiveOffGlyph) },
+            { id: 'show-archived', label: t('showArchived'), icon: glyphIcon(QueueGlyph) },
+            { id: 'only-archived', label: t('onlyArchived'), icon: glyphIcon(ArchiveCheckGlyph) },
+          ];
+          const anchor = withTooltip(t('viewOptions'), h('button', {
+            type: 'button',
+            className: 'dsc-new',
+            'aria-label': t('viewOptions'),
+            title: t('viewOptions'),
+            onClick: () => setOpen((value) => !value),
+          }, SlidersGlyph === null ? '⋯' : h(SlidersGlyph, {})));
+          return h(MenuComponent, {
+            open,
+            onClose: () => setOpen(false),
+            items,
+            selectedIds,
+            onSelect: (id) => {
+              if (id === 'hide-archived') props.onFilter('default');
+              else if (id === 'show-archived') props.onFilter('show');
+              else if (id === 'only-archived') props.onFilter('only');
+              setOpen(false);
+            },
+            align: 'end',
+            dense: true,
+            portal: true,
+            anchor,
+          });
+        }
+
+        /**
+         * The stop-and-archive confirmation the shipped browser raises when the
+         * Host refuses to archive a session that is still working.
+         *
+         * It lists the work that would be stopped and does nothing until the
+         * reader confirms; confirm calls the stop-and-archive form of the same
+         * archive call, and a failure keeps the dialog open with the reason.
+         * @param props.t - translate seat bound to {@link LOCALE_NS}.
+         * @returns the dialog, or null when nothing is pending.
+         */
+        function ArchiveConfirm(props) {
+          const t = props.t;
+          const chat = useChatState();
+          const request = chat.archiveRequest;
+          const [busy, setBusy] = React.useState(false);
+          const [error, setError] = React.useState(null);
+          React.useEffect(() => {
+            setBusy(false);
+            setError(null);
+          }, [request === null ? null : request.sessionId]);
+          if (request === null || ModalComponent === null) return null;
+
+          const close = () => {
+            if (busy) return;
+            setState({ archiveRequest: null });
+          };
+          const confirm = () => {
+            setBusy(true);
+            setError(null);
+            stopAndArchiveDaily(request.sessionId).catch((reason) => {
+              setBusy(false);
+              setError(describe(reason));
+            });
+          };
+          const footerButton = (key, label, onClick) => (ButtonComponent === null
+            ? h('button', { key, type: 'button', disabled: busy, onClick }, label)
+            : h(ButtonComponent, { key, variant: 'outline', disabled: busy, onClick }, label));
+
+          return h(ModalComponent, {
+            open: true,
+            onClose: close,
+            closeLabel: t('cancel'),
+            title: t('archiveConfirmTitle'),
+            description: t('archiveConfirmDesc', { title: request.displayTitle }),
+            footer: h(React.Fragment, null, [
+              footerButton('cancel', t('cancel'), close),
+              footerButton('confirm', t('archiveConfirmAction'), confirm),
+            ]),
+          }, [
+            h('ul', {
+              key: 'activity',
+              className: 'dsc-archiveactivity',
+              'aria-label': t('archiveConfirmActivity'),
+            }, (Array.isArray(request.activity) ? request.activity : []).map((entry, index) => h('li', { key: String(index) }, archiveActivityLine(entry)))),
+            busy ? h('div', { key: 'pending', className: 'dsc-archivestatus', role: 'status' }, t('archiveConfirmPending')) : null,
+            error === null ? null : h('div', {
+              key: 'error',
+              className: 'dsc-archiveerror',
+              role: 'alert',
+            }, error),
+          ]);
+        }
 
         /**
          * The session list that stands in for the workspace browser in chat mode.
          *
-         * A row is that browser's row minus everything a daily chat cannot do:
-         * the status dot (running), the title, and the trailing relative age —
-         * same words, same thresholds and same 10px tertiary cell as 工作's own
-         * rows, because the two lists sit one mode apart and must not disagree
-         * about how old a conversation is. No row actions, so nothing takes the
-         * age cell's place on hover.
+         * A row is that browser's own row: status dot, title, and the trailing
+         * cell with the relative age and, when pinned, the pin marker — same
+         * words, same thresholds, same 10px tertiary age, same hover swap that
+         * puts the archive and pin actions where the age was. Rows are ordered
+         * the browser's way (pinned first, then by recency) and filtered the
+         * browser's way (archived hidden, mixed in, or alone). What is left out
+         * is what a daily chat cannot do — and nothing else.
          */
         function DailyRegion(props) {
           const t = props.t;
@@ -2093,55 +2937,84 @@ window.__ModuleLoader__.load({
           // same instant, so two rows that are the same age never disagree.
           const now = useRelativeClock();
 
-          const rows = dailyRows(workspaces, sessions);
+          const rows = dailyRows(workspaces, sessions, chat.archivedFilter);
           // The list paints one page at a time and adds a page whenever its
           // 1px end strip scrolls into view; see {@link usePagedRows}.
           const paged = usePagedRows(rows);
+          const current = currentDailySessionId(sessions);
+
+          /** Open a row: an archived chat is refused with the shipped notice. */
+          const openRow = (row) => {
+            if (row.archived) {
+              notifyNotice(t('archivedNotOpenable'), 'warning');
+              return;
+            }
+            openDaily(row.id);
+          };
+
+          const empty = chat.archivedFilter === 'only'
+            ? h('div', { className: 'dsc-emptyarchived', key: 'empty' }, [
+              ArchiveGlyph === null ? null : h(ArchiveGlyph, { key: 'glyph', size: 24 }),
+              h('div', { key: 'text' }, t('noneArchived')),
+              h('button', {
+                key: 'others',
+                type: 'button',
+                className: 'dsc-emptylink',
+                onClick: () => setArchivedFilter('default'),
+              }, t('viewOthers')),
+            ])
+            : h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'));
 
           return h('div', { className: 'dsc-region' + (wide ? '' : ' dsc-rail') }, [
             h('style', { key: 'css' }, CSS),
             h('div', { className: 'dsc-head', key: 'head' }, [
               h('div', { className: 'dsc-title', key: 'title' }, t('dailyChats')),
-              // The shipped header's add control: same glyph, same two sizes
-              // (16 in the expanded sidebar, 18 in the collapsed rail), same
-              // hover-only paint — a text button here would be the one row of
-              // the sidebar that speaks a different language.
-              h('button', {
-                key: 'new',
-                type: 'button',
-                className: 'dsc-new',
-                title: t('newChat'),
-                'aria-label': t('newChat'),
-                onClick: () => {
-                  void startDailyChat();
-                },
-              }, AddGlyph === null ? '＋' : h(AddGlyph, { size: wide ? 16 : 18 })),
+              h('div', { className: 'dsc-headactions', key: 'actions' }, [
+                h(DailyViewOptions, {
+                  key: 'filter',
+                  filter: chat.archivedFilter,
+                  onFilter: setArchivedFilter,
+                  t,
+                }),
+                // The shipped header's add control: same glyph, same two sizes
+                // (16 in the expanded sidebar, 18 in the collapsed rail), same
+                // hover-only paint — a text button here would be the one row of
+                // the sidebar that speaks a different language.
+                h('button', {
+                  key: 'new',
+                  type: 'button',
+                  className: 'dsc-new',
+                  title: t('newChat'),
+                  'aria-label': t('newChat'),
+                  onClick: () => {
+                    void startDailyChat();
+                  },
+                }, AddGlyph === null ? '＋' : h(AddGlyph, { size: wide ? 16 : 18 })),
+              ]),
             ]),
             // The wrapper the shipped browser wraps its own list in; see the
             // `.dsc-listArea` rule for why the scrollbar needs it.
             h('div', { className: 'dsc-listArea', key: 'listArea' },
-              h('div', { className: 'dsc-list', key: 'list', ref: paged.listRef }, rows.length === 0
-                ? h('div', { className: 'dsc-empty', key: 'empty' }, chat.busy ? t('starting') : t('empty'))
-                : rows.slice(0, paged.visible).map((row) => h('button', {
+              h('div', {
+                className: 'dsc-list',
+                key: 'list',
+                ref: paged.listRef,
+                role: 'tree',
+                'aria-label': t('dailyChats'),
+              }, rows.length === 0 ? empty
+                : rows.slice(0, paged.visible).map((row) => h(DailyRow, {
                   key: row.id,
-                  type: 'button',
-                  className: 'dsc-row',
-                  title: row.displayTitle,
-                  onClick: () => openDaily(row.id),
-                }, [
-                  h('span', {
-                    key: 'dot',
-                    className: 'dsc-dot' + (row.running ? ' dsc-dot-on' : ''),
-                  }),
-                  h('span', { key: 'title', className: 'dsc-rowtitle' }, row.displayTitle || row.id),
-                  // Trailing age, the way a workspace row carries it: the title
-                  // cell keeps `flex:1` and clips, so the label never squeezes
-                  // the title to nothing and never wraps.
-                  h('span', {
-                    key: 'time',
-                    className: 'dsc-rowtime',
-                  }, timeLabel(row.updatedAt, now, t)),
-                ])).concat(paged.more ? [h('div', {
+                  row,
+                  now,
+                  selected: row.id === current,
+                  t,
+                  useSessionAccess: props.useSessionAccess,
+                  onOpen: openRow,
+                  onArchive: archiveDaily,
+                  onUnarchive: unarchiveDaily,
+                  onPin: pinDaily,
+                  onUnpin: unpinDaily,
+                })).concat(paged.more ? [h('div', {
                   key: 'more',
                   className: 'dsc-pager',
                   ref: paged.sentinelRef,
@@ -2255,6 +3128,26 @@ window.__ModuleLoader__.load({
           order: 50,
           locale: LOCALE_NS,
         }, ErrorToast));
+
+        // The row-action notice, painted through the shipped `Toast` primitive
+        // so an archive reads exactly like the one 工作 raises — same sentence,
+        // same inline 「撤销 / 或 筛选已归档会话」 actions, same place.
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'daily-chat-row-toast',
+          order: 50,
+          locale: LOCALE_NS,
+        }, RowActionToast));
+
+        // The stop-and-archive confirmation, the same overlay entry the shipped
+        // browser registers for its own archive action. It only ever paints
+        // something while `state.archiveRequest` holds a refused archive.
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'daily-chat-archive-confirm',
+          order: 51,
+          locale: LOCALE_NS,
+        }, ArchiveConfirm));
 
         // Only one entry renders a `single` slot, and it is the LOWEST live
         // priority — so `-1` takes the region over for chat mode and giving the
