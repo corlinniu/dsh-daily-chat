@@ -23,19 +23,22 @@
  *    to `selectPanel(id)`, which is why contribution 2 exists.
  *
  *    The rest of that list is the shell's, with one arrangement: the two system
- *    rows 「插件」 and 「自动化任务」 are moved into DSH's own 「更多」 menu. Both
+ *    rows 「插件」 and 「自动化任务」 are moved into DSH's own 「更多」 row. Both
  *    panels stay; only their rows leave the list, and their menu rows are
  *    contributed through the menu's additive seat (`sidebar.panellist.actions`)
  *    with label and glyph read back from the shell's ledger, so they look and
  *    read like the rows they replace. The hide rule is matched on that label —
- *    the only DOM handle a row has — and is published only while the menu can
- *    carry the rows, so a shell without that seat keeps every row where it was.
- *    That menu then opens DOWNWARD, as a continuation of the list instead of a
- *    second-level popup, and its trigger row reads 「收起」 while it is open: see
- *    {@link mountMoreInline}, a paint-time pass over the surface the shell
- *    owns — geometry, chrome, the trigger's label and the list's reserved
- *    height only, never the surface itself, so clicks, state and close all stay
- *    the shell's.
+ *    the only DOM handle a row has — and is published only while the expansion
+ *    can carry the rows, so a shell without that seat keeps every row where it
+ *    was.
+ *
+ *    That row then opens DOWNWARD, as a continuation of the list instead of a
+ *    second-level popup, and it reads 「收起」 while it is open: {@link
+ *    MoreExpansion} takes the row's click before the shell's menu can open and
+ *    paints the expanded rows itself, under the row. Being the owner is the
+ *    point — the shell's menu closes on a row click, on an outside click and on
+ *    `Esc`, and the expansion must close on none of them: 「收起」 is the only
+ *    way out, plus the sidebar collapsing out from under it.
  *
  *    A second, smaller pair of passes removes the same plugin's two
  *    plugin-discovery rows from the conversation view tab row's 「更多」 menu —
@@ -86,6 +89,21 @@ window.__ModuleLoader__.load({
     const React = require('react');
     const h = React.createElement;
     const primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    /**
+     * `react-dom`'s portal, when the shared module table carries it. The
+     * expansion has to reach ABOVE the sidebar column, and the frame's overlay
+     * layer sits below it (the sidebar is z-index 71, the overlay layer 20), so
+     * the only place the rows can paint over the list is a portal to `<body>`
+     * — exactly what the shell's own menu does. A build whose module table
+     * omits `react-dom` simply leaves that menu in charge.
+     */
+    let createPortal = null;
+    try {
+      const ReactDOM = require('react-dom');
+      if (ReactDOM !== null && typeof ReactDOM.createPortal === 'function') createPortal = ReactDOM.createPortal;
+    } catch (reason) {
+      console.warn('[daily-chat] react-dom is not on the module table:', reason);
+    }
 
     /** Locale namespace for this plugin's own copy. */
     const LOCALE_NS = 'dailyChat';
@@ -119,41 +137,46 @@ window.__ModuleLoader__.load({
     const WORK_PANEL = 'daily-chat-work';
     /**
      * The shell's own panel launchers that this plugin moves into DSH's native
-     * 「更多」 menu: the plugin manager page and the automation-task page. Both
+     * 「更多」 row: the plugin manager page and the automation-task page. Both
      * keep their panels — only their rows leave the panel list, and both rows
-     * come back when that menu is unavailable (an older DSH, a primitives build
-     * without `MenuItemButton`).
+     * come back when the expansion cannot carry them (an older DSH, a primitives
+     * build without `MenuItemButton`).
      */
     const MOVED_PANEL_IDS = ['plugins', 'schedules'];
-    /** Where the two moved rows sit in the 「更多」 menu, above its own actions. */
+    /** Where the two moved rows sit in the 「更多」 expansion, above its own actions. */
     const MOVED_MENU_ORDER = -10;
+    /** The registration id this plugin's contribution to the menu seat carries. */
+    const MOVED_ACTIONS_ID = 'daily-chat-moved-panels';
     /**
-     * The marker the inline 「更多」 pass puts on the shell's menu surface while
-     * it is painting it as a continuation of the panel list, and the marker on
-     * the macOS backing painted under that surface.
+     * The marker on the 「更多」 row itself while the expansion is open: it is
+     * what paints the row as the open one (the shell's own `aria-expanded`
+     * highlight is keyed on a menu that never opens here).
      */
-    const MORE_INLINE_ATTR = 'data-dsc-more-inline';
-    const MORE_BACKING_ATTR = 'data-dsc-more-backing';
+    const MORE_OPEN_ROW_ATTR = 'data-dsc-more-row';
     /**
      * The marker (and the text it carries) that turns the 「更多」 row's label into
      * 「收起」 while the expansion is open. It sits on the label span itself, so
      * the `::after` rule can read the text back with `attr()` — and it goes away
-     * the moment the shell closes the menu, leaving the row's own label alone.
+     * when the expansion closes, leaving the row's own label alone.
      */
     const MORE_OPEN_ATTR = 'data-dsc-more-open';
-    /** The three custom properties carrying the inline surface's viewport box. */
-    const MORE_X_PROPERTY = '--dsc-more-x';
-    const MORE_Y_PROPERTY = '--dsc-more-y';
-    const MORE_WIDTH_PROPERTY = '--dsc-more-width';
     /**
      * Panel-list width below which 「更多」 keeps its native popup: the collapsed
      * sidebar is an icon rail and has no width to expand into.
      */
-    const MORE_INLINE_MIN_WIDTH = 120;
+    const MORE_MIN_WIDTH = 120;
     /** The attribute a menu surface carries all by itself (see the primitives `Menu`). */
     const MENU_SURFACE_ATTR = 'data-menu-material';
-    /** The attribute the macOS backing of that surface carries. */
-    const MENU_BACKING_ATTR = 'data-menu-backing';
+    /**
+     * The shipped plugin whose two discovery rows the shell's menu carries next
+     * to this plugin's own. They are reproduced in the expansion by their own
+     * copy and their own `pluginNavigation` / `startSession` calls; a menu
+     * holding any OTHER plugin's row is left to the shell, because a row this
+     * pass does not know cannot be reproduced outside that menu.
+     */
+    const ENTRY_CUSTOMIZATION_ID = 'entry-customization';
+    /** The preset the discovery row's creator chat runs on, as DSH spells it. */
+    const CREATOR_PRESET = 'cordis';
     /**
      * Markers for the conversation view tab row's own 「更多」 menu: the two
      * plugin-discovery rows this plugin removes from it, the empty-launcher
@@ -206,6 +229,7 @@ window.__ModuleLoader__.load({
       dailyChats: '日常聊天',
       startWork: '开始工作',
       moreCollapse: '收起',
+      moreGroup: '更多',
       newChat: '新建日常聊天',
       // Row actions. The words are the workspace browser's own, so the two
       // lists read the same way; only the controls differ in where they sit.
@@ -276,6 +300,7 @@ window.__ModuleLoader__.load({
       dailyChats: 'Chats',
       startWork: 'Start working',
       moreCollapse: 'Collapse',
+      moreGroup: 'More',
       newChat: 'New chat',
       pin: 'Pin session',
       unpin: 'Unpin session',
@@ -574,38 +599,38 @@ window.__ModuleLoader__.load({
      * the same entry point is clicked again, and that reuse reads the very ids a
      * projection would have to hide.
      *
-     * The tail rules restyle DSH's 「更多」 menu surface while
-     * {@link mountMoreInline} is painting it as a continuation of the panel
-     * list. The shell's menu stays exactly the shell's — same node, same rows,
-     * same open/close state — so nothing here hides or moves anything; the
-     * surface is simply re-aimed with the geometry the pass publishes and
-     * stripped of the card chrome that would read as a second level (translucent
-     * material, elevation, rounded corners, and the macOS backing painted under
-     * it). The rows take the panel list's own metrics — 36px tall with the
-     * list's 2px gaps, 14px/22px type, a 16px glyph, the same 8px gutters — so
-     * the expansion reads as the list continued rather than as a menu that
-     * happens to sit below it. Two more rules turn the trigger's own label into
-     * 「收起」 while it is open: the text arrives through `MORE_OPEN_ATTR` on the
-     * title span, and `::after{content:attr(...)}` paints it in place of the
-     * shell's own 「更多」 without touching that text node. The span becomes a
-     * flex box so the substituted line is centered exactly like a normal row
-     * label: with the old `font-size:0` + inline pseudo, the pseudo's baseline
-     * hung off a zero-size strut and sat a pixel or two off the row's glyph.
+     * The tail rules dress the 「更多」 expansion: the trigger row's open state,
+     * its 「收起」 label, and the row surface {@link MoreExpansion} portals to
+     * `<body>`. The expansion is this plugin's own DOM — unlike the shell menu
+     * it replaces — so it takes the panel list's metrics and nothing of the
+     * menu's card chrome: 36px rows with the list's 2px gaps, 14px/22px type, a
+     * 16px glyph, the same 8px gutters and the same hover wash, so it reads as
+     * the list continued rather than as a second-level menu. The trigger's own
+     * label turns into 「收起」 while it is open: the text arrives through
+     * `MORE_OPEN_ATTR` on the title span, and `::after{content:attr(...)}`
+     * paints it in place of the shell's own 「更多」 without touching that text
+     * node. The span is a flex box so the substituted line is centered exactly
+     * like a normal row label.
      */
     const CHROME_CSS = [
       'button[class*="newSession"]{display:none !important}',
       `html[${MODE_ATTRIBUTE}="daily"] [class*="heroWorkspaceRow"]{display:none !important}`,
       `html[${MODE_ATTRIBUTE}="daily"] [data-slot="conversation.session.header.actions"] > span[title] > svg{display:none !important}`,
       '[data-row-key^="session:"]:not(:has(> [class*="_time"])):not(:has(> [class*="_rowActions"])){display:none !important}',
-      `[${MORE_INLINE_ATTR}]{left:var(${MORE_X_PROPERTY},0px) !important;top:var(${MORE_Y_PROPERTY},0px) !important;width:var(${MORE_WIDTH_PROPERTY},200px) !important;min-width:0 !important;max-width:none !important;max-height:none !important;margin:0 !important;padding:0 !important;border:0 !important;border-radius:0 !important;background:transparent !important;box-shadow:none !important;visibility:visible !important}`,
-      `[${MORE_INLINE_ATTR}] > [class*="material"]{display:none !important}`,
-      `[${MORE_INLINE_ATTR}] > [class*="viewport"]{gap:2px}`,
-      `[${MORE_BACKING_ATTR}]{display:none !important}`,
+      `nav[class*="panelList"] button[${MORE_OPEN_ROW_ATTR}]{background-color:var(--dsw-alias-interactive-bg-hover)}`,
       `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]{display:flex;align-items:center;font-size:0 !important}`,
       `nav[class*="panelList"] span[class*="panelTitle"][${MORE_OPEN_ATTR}]::after{content:attr(${MORE_OPEN_ATTR});font-size:14px;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}`,
-      `[${MORE_INLINE_ATTR}] button[role="menuitem"]{min-height:36px;padding:7px 8px;gap:8px;font-size:14px;line-height:22px;border-radius:var(--dsw-radius-md)}`,
-      `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"]{width:16px;height:16px;color:inherit}`,
-      `[${MORE_INLINE_ATTR}] button[role="menuitem"] > span[class*="itemIcon"] svg{width:16px;height:16px}`,
+      // The expansion surface. It is portaled to `<body>` and parked under the
+      // trigger row every frame, so the box comes from the geometry pass; the
+      // 90 sits above the sidebar column (71) and below modals, menus and
+      // toasts (1000+), which is exactly where a list continuation belongs.
+      '.dsc-more{position:fixed;z-index:90;display:flex;flex-direction:column;gap:2px;margin:0;padding:0;pointer-events:auto;background:transparent}',
+      '.dsc-more-row{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-height:36px;margin:0;padding:7px 8px;font-family:inherit;font-size:14px;line-height:22px;text-align:left;color:var(--dsw-alias-label-primary);cursor:pointer;background:transparent;border:0;border-radius:var(--dsw-radius-md)}',
+      '.dsc-more-row:hover{background-color:var(--dsw-alias-interactive-bg-hover)}',
+      '.dsc-more-row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}',
+      '.dsc-more-glyph{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px}',
+      '.dsc-more-glyph > svg{width:16px;height:16px}',
+      '.dsc-more-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       `[${VIEW_ACTION_ATTR}]{display:none !important}`,
       `[${VIEW_MORE_EMPTY_ATTR}]{display:none !important}`,
       `[${VIEW_MORE_MENU_ATTR}]{display:none !important}`,
@@ -762,6 +787,8 @@ window.__ModuleLoader__.load({
       busy: false,
       error: null,
       moreMenuReady: false,
+      /** Whether the 「更多」 expansion is open. Only 「收起」 sets it back. */
+      moreExpanded: false,
       /** Which of {@link ARCHIVED_FILTERS} the daily list is showing. */
       archivedFilter: readArchivedFilter(),
       /** The transient success notice: `{ seq, text, actions }`, or null. */
@@ -896,6 +923,14 @@ window.__ModuleLoader__.load({
     const SlidersGlyph = primitiveGlyph('IconSlidersTwoOutlineRegular');
     /** The warning glyph the shipped failure toasts put in front of their text. */
     const WarningGlyph = primitiveGlyph('IconWarningOutlineRegular');
+    /**
+     * The two glyphs `entry-customization` draws on its own menu rows — the
+     * pinwheel for 「浏览更多插件」 and the plus for 「创建你的插件」. The
+     * expansion reproduces those rows, so it borrows the same artwork; a build
+     * without either glyph keeps the row's text and an empty 16px cell.
+     */
+    const DiscoveryBrowseGlyph = primitiveGlyph('IconPluginPinwheelOutlineRegular');
+    const DiscoveryCreateGlyph = primitiveGlyph('IconPlusOutlineRegular');
     /** Shared primitives the row actions and filter menu need, when present. */
     const TooltipComponent = typeof primitives.Tooltip === 'function' ? primitives.Tooltip : null;
     const MenuComponent = typeof primitives.Menu === 'function' ? primitives.Menu : null;
@@ -2075,7 +2110,7 @@ window.__ModuleLoader__.load({
           startWorkSession();
         });
 
-        /* ── the shell's own rows, folded into its 「更多」 menu ───────────────── */
+        /* ── the shell's own rows, moved into the 「更多」 expansion ─────────────── */
 
         /**
          * One ledger read of the sidebar's panel rows. The raw entry list is
@@ -2130,8 +2165,10 @@ window.__ModuleLoader__.load({
          * 「自动化任务」. Label and glyph both come from the shell's ledger, so the
          * rows look like the rows they replace. They call the owner's own
          * `onOpen` — the entry point the shell's menu rows use, which selects the
-         * panel and reports the click — after dismissing the menu, exactly like
-         * the rows around them.
+         * panel and reports the click — after dismissing the menu. This component
+         * is the fallback path: it renders only when the menu stays the shell's
+         * own (see {@link ownsMoreMenu}), because the expansion paints its rows
+         * itself.
          * @param props - owner seats (`onOpen`, `onDismiss`) supplied by the menu.
          * @returns two menu rows, or null while neither panel is registered.
          */
@@ -2161,8 +2198,9 @@ window.__ModuleLoader__.load({
          * A row's only DOM handles are its hashed class, its localized
          * `aria-label` and `aria-current` — no id, no `data-*` — so the rule is
          * matched on the label the ledger reports: the same text the row paints,
-         * whatever locale is active. It is published only while the 「更多」 menu
-         * can actually carry the two rows; with no menu to move them into (an
+         * whatever locale is active. It is published only while the 「更多」
+         * expansion can actually carry the two rows; with no expansion to move
+         * them into (an
          * older DSH without the actions seat, a primitives build without
          * `MenuItemButton`) every row stays visible instead of disappearing off
          * the sidebar.
@@ -2184,90 +2222,146 @@ window.__ModuleLoader__.load({
 
         /* ── 「更多」 as an inline expansion ───────────────────────────────────── */
 
+        /** The panel list, or null before the shell paints it. */
+        function panelList() {
+          return document.querySelector('nav[class*="panelList"]');
+        }
+
         /**
-         * Expand DSH's 「更多」 menu downward inside the panel list instead of
-         * letting it pop up as a second-level menu.
-         *
-         * The list paints that menu through the shared `Menu` primitive, which
-         * portals its surface to `<body>` and pins it to the anchor row; a
-         * plugin gets no seat inside it. Moving the portaled node into the
-         * sidebar would be the direct way and is a trap: React deletes a portal
-         * child with `container.removeChild(node)`, so a reparented surface
-         * makes the next close throw. This pass therefore leaves the node
-         * exactly where React owns it and only changes how it is painted:
-         *
-         *   - geometry: the surface is fixed under the 「更多」 row, at the panel
-         *     list's own left edge and width, re-read every frame (the shell
-         *     already runs a position loop for the same menu);
-         *   - space: the list reserves the surface's height in its bottom
-         *     padding, so the workspace list moves down exactly as it would if
-         *     the rows were painted in the list — and moves back when the menu
-         *     closes and React removes the surface;
-         *   - chrome: {@link CHROME_CSS} drops the translucent card, its
-         *     elevation, its rounded corners and the macOS backing under it, and
-         *     gives the rows the panel list's own metrics, so what remains reads
-         *     as the same list continued.
-         *
-         * Adoption is deliberately narrow: a menu surface appearing in `<body>`
-         * while the panel list's own `[aria-haspopup]` row is expanded and the
-         * list is wide enough to expand into. The collapsed sidebar is an icon
-         * rail and keeps the native popup; a build whose markup stops matching
-         * (no `data-menu-material`, a renamed list class, no
-         * `requestAnimationFrame`) simply leaves the popup alone — the same
-         * behaviour as before this pass existed.
-         *
-         * The trigger row's own label is swapped too: while the expansion is
-         * open its title reads 「收起」 (`MORE_OPEN_ATTR`, text supplied by the
-         * locale seat), so the same row says what clicking it will do.
-         *
-         * @param collapseLabel - supplies the trigger's open-state title.
-         * @returns the disposer that gives the surface and the list's space back.
+         * The 「更多」 row itself: the only menu launcher in the panel list. A
+         * shell that renames the list or the row yields null, and every pass
+         * below then stays out of the way.
+         * @param list - the panel list, when already resolved.
+         * @returns the trigger button, or null.
          */
-        function mountMoreInline(collapseLabel) {
+        function moreTrigger(list) {
+          if (list === null) return null;
+          return list.querySelector('button[aria-haspopup="menu"]');
+        }
+
+        /**
+         * Whether the expansion may carry the menu seat.
+         *
+         * The seat's own rows are this plugin's two moved panel rows plus, on a
+         * stock install, `entry-customization`'s two discovery rows — both
+         * reproduced by hand below. Any OTHER row belongs to a plugin whose
+         * component this pass cannot render outside the shell's menu, so one
+         * unknown row is enough to leave that menu to the shell: the failure
+         * direction is the shipped native menu, never a hidden row.
+         * @param entries - the `sidebar.panellist.actions` ledger.
+         * @returns whether the expansion owns that menu.
+         */
+        function ownsMoreMenu(entries) {
+          return entries.every((entry) => {
+            const id = entry.options.id;
+            return id === MOVED_ACTIONS_ID || id === ENTRY_CUSTOMIZATION_ID;
+          });
+        }
+
+        /** Snapshot handed out while the menu seat cannot be read at all. */
+        const EMPTY_ACTIONS = [];
+
+        /** One ledger read of the menu seat; a missing seat reads as empty. */
+        const readActionsEntries = () => {
+          try {
+            return ctx.slots.entries('sidebar.panellist.actions');
+          } catch (reason) {
+            console.warn('[daily-chat] reading the menu seat failed:', reason);
+            return EMPTY_ACTIONS;
+          }
+        };
+        /** Menu-seat notifications, silent on a build without that seat. */
+        const subscribeActionsEntries = (listener) => {
+          try {
+            return ctx.slots.subscribe('sidebar.panellist.actions', listener);
+          } catch (reason) {
+            console.warn('[daily-chat] watching the menu seat failed:', reason);
+            return () => {};
+          }
+        };
+
+        /** The menu seat's ledger as React sees it. */
+        function useActionsEntries() {
+          return React.useSyncExternalStore(subscribeActionsEntries, readActionsEntries, readActionsEntries);
+        }
+
+        /**
+         * Take the 「更多」 row's click before the shell's menu can answer it.
+         *
+         * The row's click handler is the shell's and toggles ITS menu — the one
+         * that closes on `Esc`, on an outside click and after any row. The
+         * expansion is the plugin's own open state, so the click is claimed in
+         * the capture phase: the event never reaches the shell's handler, no
+         * menu mounts, and the same row closes the expansion again while it
+         * reads 「收起」. The rail keeps the native menu — an icon column has no
+         * width for the rows.
+         * @param onToggle - called instead of the shell's menu.
+         * @returns the disposer that gives the row back.
+         */
+        function mountMoreTrigger(onToggle) {
+          if (typeof document === 'undefined') return () => {};
+          const onClick = (event) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+            const row = target.closest('button[aria-haspopup="menu"]');
+            if (row === null) return;
+            const list = panelList();
+            if (list === null || !list.contains(row)) return;
+            if (list.getBoundingClientRect().width < MORE_MIN_WIDTH) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onToggle();
+          };
+          document.addEventListener('click', onClick, true);
+          return () => document.removeEventListener('click', onClick, true);
+        }
+
+        /**
+         * Park the expansion under the 「更多」 row and reserve its height in the
+         * panel list, exactly where the rows would sit if the list had painted
+         * them: the surface is fixed at the list's own left edge and width, and
+         * the list's bottom padding grows by the surface's height so the
+         * sessions below move down with it.
+         *
+         * The trigger row is marked while it is open — the open-state paint, the
+         * `aria-expanded` a screen reader reads, and the label carrier that
+         * paints 「收起」. All of it is re-asserted every frame because the shell
+         * repaints the row on its own schedule; closing removes it again. A row
+         * that disappears (the sidebar collapsed to its rail, the sidebar
+         * unmounted) closes the expansion rather than stranding it.
+         * @param surface - the expansion surface, already mounted.
+         * @param collapseLabel - the trigger's open-state text.
+         * @param onLost - called when the row, or the width the rows need, is gone.
+         * @returns the disposer that removes every mark and the reserved height.
+         */
+        function mountMoreGeometry(surface, collapseLabel, onLost) {
           if (
             typeof document === 'undefined'
-            || typeof MutationObserver !== 'function'
+            || surface === null
             || typeof requestAnimationFrame !== 'function'
           ) {
             return () => {};
           }
 
-          /** The surface being expanded, while the menu is open. */
-          let surface = null;
-          /** The list whose bottom padding holds the reserved height. */
-          let spacedList = null;
           /** Handle of the geometry loop, or 0 while it is not running. */
           let frame = 0;
+          /** The list whose bottom padding holds the reserved height. */
+          let spacedList = null;
+          /** The trigger row this pass has marked. */
+          let markedRow = null;
+          /** The trigger's title span, while the open-state label is painted. */
+          let markedTitle = null;
 
-          /** The sidebar's panel list, or null before the shell paints it. */
-          function panelList() {
-            return document.querySelector('nav[class*="panelList"]');
-          }
-
-          /** The open menu's row, while the list is wide enough to expand into. */
-          function openRow(list) {
-            if (list === null || list.getBoundingClientRect().width < MORE_INLINE_MIN_WIDTH) return null;
-            return list.querySelector('button[aria-haspopup="menu"][aria-expanded="true"]');
-          }
-
-          /** Drop the reserved height and every mark of the current pass. */
-          function forget() {
-            if (frame !== 0) {
-              cancelAnimationFrame(frame);
-              frame = 0;
+          /** Drop every mark the current pass holds. */
+          function unmark() {
+            if (markedTitle !== null) {
+              markedTitle.removeAttribute(MORE_OPEN_ATTR);
+              markedTitle = null;
             }
-            for (const marked of document.querySelectorAll(`[${MORE_BACKING_ATTR}]`)) {
-              marked.removeAttribute(MORE_BACKING_ATTR);
-            }
-            for (const titled of document.querySelectorAll(`nav[class*="panelList"] [${MORE_OPEN_ATTR}]`)) {
-              titled.removeAttribute(MORE_OPEN_ATTR);
-            }
-            if (surface !== null) {
-              surface.removeAttribute(MORE_INLINE_ATTR);
-              surface.style.removeProperty(MORE_X_PROPERTY);
-              surface.style.removeProperty(MORE_Y_PROPERTY);
-              surface.style.removeProperty(MORE_WIDTH_PROPERTY);
-              surface = null;
+            if (markedRow !== null) {
+              markedRow.removeAttribute(MORE_OPEN_ROW_ATTR);
+              markedRow.setAttribute('aria-expanded', 'false');
+              markedRow = null;
             }
             if (spacedList !== null) {
               spacedList.style.paddingBottom = '';
@@ -2275,53 +2369,57 @@ window.__ModuleLoader__.load({
             }
           }
 
-          /**
-           * Hide the macOS backing painted under the translucent menu.
-           *
-           * The backing is its own portal node, and React re-appends it from a
-           * layout effect right after opening — a remove+add of the SAME node.
-           * That is why nothing here pins a reference: reading that removal as
-           * "the menu closed" tears the whole pass down, which is exactly what
-           * the first revision of this code did. Re-marking from the geometry
-           * loop survives the move too, since attributes travel with the node.
-           */
-          function hideBacking() {
-            const anchor = surface.style.getPropertyValue('--dsh-menu-anchor');
-            if (anchor === '') return;
-            for (const candidate of document.querySelectorAll(`[${MENU_BACKING_ATTR}]`)) {
-              if (candidate.style.getPropertyValue('--dsh-menu-anchor') !== anchor) continue;
-              if (!candidate.hasAttribute(MORE_BACKING_ATTR)) candidate.setAttribute(MORE_BACKING_ATTR, '');
+          /** Stop the loop and give the row and the list their space back. */
+          function release() {
+            if (frame !== 0) {
+              cancelAnimationFrame(frame);
+              frame = 0;
             }
+            unmark();
           }
 
-          /** Re-aim the surface, then keep the list's reserved height in step. */
+          /** One frame: re-measure, re-mark, then ask for the next one. */
           function measure() {
             frame = 0;
             const list = panelList();
-            if (surface === null || !surface.isConnected || list === null || !list.isConnected) {
-              forget();
+            const row = moreTrigger(list);
+            if (
+              list === null
+              || row === null
+              || !surface.isConnected
+              || list.getBoundingClientRect().width < MORE_MIN_WIDTH
+            ) {
+              release();
+              onLost();
               return;
             }
-            const row = openRow(list);
-            // The menu is open for as long as its surface is mounted; a frame
-            // where the row is momentarily unreadable is waited out rather than
-            // taken as a close.
-            if (row === null) {
-              frame = requestAnimationFrame(measure);
-              return;
+            if (markedRow !== row) {
+              if (markedRow !== null) {
+                markedRow.removeAttribute(MORE_OPEN_ROW_ATTR);
+                markedRow.setAttribute('aria-expanded', 'false');
+              }
+              markedRow = row;
             }
-            hideBacking();
-            // The row's title span is the open-state label's carrier; the rail
-            // paints no title at all, and that state keeps the native popup.
+            if (!row.hasAttribute(MORE_OPEN_ROW_ATTR)) row.setAttribute(MORE_OPEN_ROW_ATTR, '');
+            if (row.getAttribute('aria-expanded') !== 'true') row.setAttribute('aria-expanded', 'true');
+            // The title span is the 「收起」 carrier; the rail paints no title at
+            // all, and that state never reaches this pass.
             const title = row.querySelector('span[class*="panelTitle"]');
-            if (title !== null && !title.hasAttribute(MORE_OPEN_ATTR)) {
-              title.setAttribute(MORE_OPEN_ATTR, collapseLabel());
+            if (title === null) {
+              if (markedTitle !== null) {
+                markedTitle.removeAttribute(MORE_OPEN_ATTR);
+                markedTitle = null;
+              }
+            } else {
+              if (markedTitle !== title && markedTitle !== null) markedTitle.removeAttribute(MORE_OPEN_ATTR);
+              markedTitle = title;
+              if (!title.hasAttribute(MORE_OPEN_ATTR)) title.setAttribute(MORE_OPEN_ATTR, collapseLabel);
             }
             const listRect = list.getBoundingClientRect();
             const rowRect = row.getBoundingClientRect();
-            surface.style.setProperty(MORE_X_PROPERTY, `${listRect.left + 2}px`);
-            surface.style.setProperty(MORE_Y_PROPERTY, `${rowRect.bottom + 2}px`);
-            surface.style.setProperty(MORE_WIDTH_PROPERTY, `${Math.max(0, listRect.width - 4)}px`);
+            surface.style.left = `${listRect.left + 2}px`;
+            surface.style.top = `${rowRect.bottom + 2}px`;
+            surface.style.width = `${Math.max(0, listRect.width - 4)}px`;
             const height = surface.getBoundingClientRect().height;
             if (height > 0) {
               // A repainted list is a new node even at the same height, and a
@@ -2335,53 +2433,216 @@ window.__ModuleLoader__.load({
             frame = requestAnimationFrame(measure);
           }
 
-          /** Take a freshly opened menu surface into the pass, when it is ours. */
-          function adopt(candidate) {
-            if (surface !== null && surface.isConnected) return;
-            forget();
-            const list = panelList();
-            if (list === null || openRow(list) === null) return;
-            // An empty menu would reserve gap without showing anything.
-            if (candidate.querySelector('button[role="menuitem"]') === null) return;
-            surface = candidate;
-            surface.setAttribute(MORE_INLINE_ATTR, '');
-            measure();
+          measure();
+          return release;
+        }
+
+        /** Select one of the moved rows' panels, leaving the expansion open. */
+        function openPanel(id) {
+          try {
+            ctx.layout.selectPanel(id);
+          } catch (reason) {
+            console.warn('[daily-chat] opening the panel failed:', reason);
           }
+        }
 
-          const observer = new MutationObserver((records) => {
-            for (const record of records) {
-              for (const node of record.addedNodes) {
-                if (!(node instanceof Element)) continue;
-                const candidate = node.hasAttribute(MENU_SURFACE_ATTR)
-                  ? node
-                  : node.querySelector(`[${MENU_SURFACE_ATTR}]`);
-                if (candidate !== null) adopt(candidate);
+        /**
+         * One borrowed glyph as a 16px element. Passed the component — not an
+         * element — a plain `h(child)` renders nothing, which is how the two
+         * discovery rows first lost their icons.
+         * @param component - the glyph component, or null when this build lacks it.
+         * @returns the 16px glyph element, or null.
+         */
+        function glyphOf(component) {
+          return component === null ? null : h(component, { size: 16 });
+        }
+
+        /** One row of the expansion: glyph, label, and what a click does. */
+        function expansionRow(key, glyph, label, onSelect) {
+          return h('button', {
+            key,
+            type: 'button',
+            className: 'dsc-more-row',
+            onClick: onSelect,
+          }, [
+            h('span', { key: 'glyph', className: 'dsc-more-glyph', 'aria-hidden': 'true' }, glyph),
+            h('span', { key: 'label', className: 'dsc-more-title' }, label),
+          ]);
+        }
+
+        /**
+         * The two discovery rows the shell's menu carries after this plugin's
+         * own: 「浏览更多插件」 and 「创建你的插件」.
+         *
+         * They belong to the shipped `entry-customization` plugin, which offers
+         * no seat-level API a bundle can delegate to once that menu is out of
+         * the picture, so the rows are reproduced from the copy the plugin
+         * publishes and the two calls it makes — `pluginNavigation.openList()`
+         * and a creator session, called the way that plugin calls them. Either may
+         * be missing on a given build; the row is then left out rather than shown
+         * broken.
+         * @param present - whether that plugin registered into the menu seat at all.
+         * @returns the discovery rows, in the menu's own order.
+         */
+        function discoveryRows(present) {
+          const rows = [];
+          if (!present) return rows;
+          const custom = ctx.locale.bind('entryCustomization');
+          const install = custom('install');
+          const create = custom('create');
+          // A build without that locale namespace resolves the key itself;
+          // `install`/`create` standing in for the sentence means these rows are
+          // not this plugin's to reproduce.
+          if (install === 'install' || create === 'create') return rows;
+          const navigation = ctx.get('pluginNavigation');
+          if (navigation !== undefined && typeof navigation.openList === 'function') {
+            rows.push(expansionRow('browse-plugins', glyphOf(DiscoveryBrowseGlyph), install, () => {
+              try {
+                navigation.openList();
+              } catch (reason) {
+                console.warn('[daily-chat] opening the plugin list failed:', reason);
               }
-              for (const node of record.removedNodes) {
-                // Only the surface itself closes the expansion. The backing has
-                // its own remove+add cycle while the menu stays open (see
-                // {@link hideBacking}), so it must not be read as a close.
-                if (node === surface) forget();
+            }));
+          }
+          if (typeof ctx.uiWorkspace.startSession === 'function') {
+            const prompt = custom('createPrompt.sidebar');
+            rows.push(expansionRow('create-plugin', glyphOf(DiscoveryCreateGlyph), create, () => {
+              try {
+                ctx.uiWorkspace.startSession(undefined, {
+                  agentPreset: CREATOR_PRESET,
+                  prompt: prompt === 'createPrompt.sidebar' ? undefined : prompt,
+                  whenDraftExists: 'append',
+                });
+              } catch (reason) {
+                console.warn('[daily-chat] starting the creator chat failed:', reason);
               }
+            }));
+          }
+          return rows;
+        }
+
+        /**
+         * Move focus into the expansion the way the shell's menu did, and walk
+         * its rows with Up/Down.
+         *
+         * Focus stays inside the expansion while it is open, so the open state
+         * never fights the page's own focus: opening lands on the first row,
+         * Up/Down walk the rows, and Up from the first row returns to the
+         * trigger row — which reads 「收起」 and closes on Enter. `Esc` is left
+         * alone on purpose; it is not a way out of this expansion.
+         * @param surface - the expansion surface, already mounted.
+         * @returns the disposer that stops the keyboard walk.
+         */
+        function mountMoreFocus(surface) {
+          if (surface === null || typeof document === 'undefined') return () => {};
+          const rowsIn = () => Array.from(surface.querySelectorAll('button:not(:disabled)'));
+          const first = rowsIn()[0];
+          if (first !== undefined) first.focus({ preventScroll: true });
+          const onKeyDown = (event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            const rows = rowsIn();
+            if (rows.length === 0) return;
+            const index = rows.indexOf(document.activeElement);
+            if (index === -1) return;
+            event.preventDefault();
+            if (event.key === 'ArrowDown') {
+              rows[(index + 1) % rows.length].focus();
+              return;
             }
-          });
-          observer.observe(document.body, { childList: true });
-
+            if (index > 0) {
+              rows[index - 1].focus();
+              return;
+            }
+            const trigger = moreTrigger(panelList());
+            if (trigger !== null) trigger.focus();
+          };
+          surface.addEventListener('keydown', onKeyDown);
           return () => {
-            observer.disconnect();
-            forget();
+            surface.removeEventListener('keydown', onKeyDown);
           };
         }
 
         /**
-         * Mounts {@link mountMoreInline} for as long as the plugin is loaded: the
-         * pass corrects the shell's menu in the DOM and paints nothing of its
-         * own, so the overlay occupant is null.
+         * The 「更多」 expansion: the panel rows the shell's own menu used to
+         * carry, painted as a continuation of the panel list.
+         *
+         * It replaces that menu rather than decorating it. The menu closes on
+         * `Esc`, on a click outside itself and after any row is chosen — and
+         * those three are exactly what the expansion must not do, so the open
+         * state has to be the plugin's: opened by the 「更多」 row, closed by the
+         * same row while it reads 「收起」, and by nothing else except the row
+         * leaving the sidebar. Clicks inside are ordinary row clicks: they open
+         * their panel (or the plugin list / a creator chat) and the expansion
+         * stays put.
+         *
+         * The surface portals to `<body>`: the frame's overlay layer paints
+         * below the sidebar column, so a fixed box inside it would sit behind
+         * the sidebar. A slot component still owns it, and the geometry pass
+         * follows the trigger row every frame.
          */
-        function MoreInline(props) {
-          const collapseLabel = typeof props.t === 'function' ? props.t('moreCollapse') : '收起';
-          React.useEffect(() => mountMoreInline(() => collapseLabel), [collapseLabel]);
-          return null;
+        function MoreExpansion(props) {
+          const chat = useChatState();
+          const entries = usePanelEntries();
+          const actionEntries = useActionsEntries();
+          const t = typeof props.t === 'function' ? props.t : (key) => key;
+          const collapseLabel = t('moreCollapse');
+          const owned = chat.moreMenuReady
+            && MenuItemButton !== null
+            && createPortal !== null
+            && ownsMoreMenu(actionEntries);
+          const expanded = owned && chat.moreExpanded;
+          const surface = React.useRef(null);
+
+          // The trigger row's click is claimed only while this pass can carry
+          // its menu; otherwise the shell's menu stays exactly as it shipped.
+          React.useEffect(() => {
+            if (!owned) return undefined;
+            return mountMoreTrigger(() => {
+              setState({ moreExpanded: !state.moreExpanded });
+            });
+          }, [owned]);
+
+          // Follow the row for as long as the surface is open. A layout effect,
+          // so the first frame is measured and placed before anything paints.
+          React.useLayoutEffect(() => {
+            if (!expanded) return undefined;
+            return mountMoreGeometry(surface.current, collapseLabel, () => {
+              setState({ moreExpanded: false });
+            });
+          }, [expanded, collapseLabel]);
+
+          // The shell's own menu walked its rows with the keyboard (it focused
+          // the first one); the expansion keeps that part: focus lands on the
+          // first row, Up/Down walk the rows, and Up from the first row goes
+          // back to the trigger, whose Enter closes the expansion.
+          React.useLayoutEffect(() => {
+            if (!expanded) return undefined;
+            return mountMoreFocus(surface.current);
+          }, [expanded]);
+
+          // A menu seat this pass cannot carry (an unknown third-party row, the
+          // seat going away) hands the whole interaction back to the shell.
+          React.useEffect(() => {
+            if (owned || !chat.moreExpanded) return;
+            setState({ moreExpanded: false });
+          }, [owned, chat.moreExpanded]);
+
+          if (!expanded) return null;
+          const rows = [];
+          for (const id of MOVED_PANEL_IDS) {
+            const entry = movedEntry(entries, id);
+            const label = entryLabel(entry);
+            if (label === undefined) continue;
+            rows.push(expansionRow(id, entryGlyph(entry), label, () => openPanel(id)));
+          }
+          rows.push(...discoveryRows(actionEntries.some((entry) => entry.options.id === ENTRY_CUSTOMIZATION_ID)));
+          if (rows.length === 0) return null;
+          return createPortal(h('div', {
+            className: 'dsc-more',
+            ref: surface,
+            role: 'group',
+            'aria-label': t('moreGroup'),
+          }, rows), document.body);
         }
 
         /* ── the conversation view row's menu ─────────────────────────────────── */
@@ -3063,16 +3324,19 @@ window.__ModuleLoader__.load({
           locale: LOCALE_NS,
         }, WorkStarter));
 
-        // The shell's 「更多」 menu takes over two of its own panel rows. This
-        // registration is also the gate for {@link MovedPanelsStyle}: while the
-        // menu content is live the rows are hidden, and when the seat is missing
-        // the rows stay exactly where the shell put them. `moreMenuReady` is
-        // published through the store because the style seat mounts separately
-        // and has to repaint when this one lands.
+        // The 「更多」 expansion lives on this seat: its presence is what makes
+        // the shell paint the 「更多」 row in the first place, and its content is
+        // the fallback the native menu paints when the expansion has to stand
+        // down (an unknown third-party row, no `react-dom` portal). This
+        // registration is also the gate for {@link MovedPanelsStyle}: while it is
+        // live the rows are hidden, and when the seat is missing the rows stay
+        // exactly where the shell put them. `moreMenuReady` is published through
+        // the store because the style seat mounts separately and has to repaint
+        // when this one lands.
         ctx.slots.inject('sidebar.panellist.actions', () => {
           const dispose = ctx.slots.register({
             name: 'sidebar.panellist.actions',
-            id: 'daily-chat-moved-panels',
+            id: MOVED_ACTIONS_ID,
             order: MOVED_MENU_ORDER,
           }, MovedPanelsMenu);
           setState({ moreMenuReady: true });
@@ -3094,15 +3358,16 @@ window.__ModuleLoader__.load({
           order: 2,
         }, MovedPanelsStyle));
 
-        // The pass that turns the shell's 「更多」 popup into a downward expansion
-        // of the list. It owns no DOM of its own — it rides the menu surface the
-        // shell paints — but it must be mounted for as long as the plugin is.
+        // The 「更多」 expansion. It paints its own rows (portaled over the
+        // sidebar) and claims the trigger row's click, so it must be mounted for
+        // as long as the plugin is; the rows it shows are gated on the menu seat
+        // still being one it can carry.
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'daily-chat-more-inline',
           order: 3,
           locale: LOCALE_NS,
-        }, MoreInline));
+        }, MoreExpansion));
 
         // The conversation view row's own 「更多」 menu: same idea, different menu.
         // It strips the two plugin-discovery rows and retires the launcher while
