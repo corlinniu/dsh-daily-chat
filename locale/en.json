@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Daily chat and work modes",
+    "description": "Splits New Session into a lightweight daily chat (web, questions, local file read/write, no shell or subagents) and the full coding agent, with a daily session list in the sidebar."
+  }
+}
